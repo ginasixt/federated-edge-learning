@@ -170,7 +170,7 @@ def server_fn(context: Context) -> ServerAppComponents:
     screening = ScreeningPolicy()
     
     # Checkpoint-Verzeichnis
-    checkpoint_dir = Path(f"result/alpha03/multi_thr")
+    checkpoint_dir = Path(f"result/{rc.get('split-path','default')}/multi_thr/")
     
     # Model-Dimension (aus prepared data)
     model_dim = 21  # Deine Feature-Anzahl (kannst du auch dynamisch laden)
@@ -377,9 +377,9 @@ def server_fn(context: Context) -> ServerAppComponents:
         # FedAvg-Parameter
         fraction_fit=float(rc.get("fraction-fit", 0.8)),
         fraction_evaluate=float(rc.get("fraction-evaluate", 1.0)),
-        min_fit_clients=int(rc.get("min-fit-clients", 8)),
-        min_available_clients=int(rc.get("min-available-clients", 10)),
-        min_evaluate_clients=int(rc.get("min-evaluate-clients", 10)),
+        min_fit_clients=int(rc.get("min-fit-clients", 6)), # is the number of clients that are sampled to be trained in each round
+        min_available_clients=int(rc.get("min-available-clients", 8)), 
+        min_evaluate_clients=int(rc.get("min-evaluate-clients", 8)),
         on_fit_config_fn=on_fit_config_fn,
         on_evaluate_config_fn=on_evaluate_config_fn,
         evaluate_metrics_aggregation_fn=evaluate_metrics_aggregation_fn,

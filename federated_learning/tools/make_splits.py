@@ -121,7 +121,7 @@ if __name__ == "__main__":
         for cid, idxs in local_train.items()
     }
 
-    # Val PROPORTIONAL zu Train (NEW!)
+    # Val PROPORTIONAL zu Train aufteilen
     global_val_map = proportional_val_split(global_train_map, val_idx, seed=a.seed + 1)
 
     output = {

@@ -41,15 +41,16 @@ clientapp = "federated_learning.client_app:app"
 num-server-rounds = 20
 fraction-fit = 0.8 # 80% der Clients pro Runde
 fraction-evaluate = 1.0
-min-fit-clients = 8
-min-evaluate-clients = 9
+min-fit-clients = 6
+min-available-clients = 8
+min-evaluate-clients = 8
 local-epochs = 1
 
 # Datenpfade
 dataset-path = "data/diabetes.csv"
 prepared-parquet = "data/diabetes.parquet"
 norm-stats-json = "data/norm_stats.json"
-split-path = "splits_dirichlet_10_a03.json"
+split-path = "splits_iid_scaling/splits_iid_8_clients.json"
 
 # Client
 batch-size = 128
@@ -72,7 +73,7 @@ default = "local-simulation"
 
 # Local simulation federation with 10 virtual SuperNodes
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 10
+options.num-supernodes = 1024
 
 # Remote federation example for use with SuperLink
 [tool.flwr.federations.remote-federation]

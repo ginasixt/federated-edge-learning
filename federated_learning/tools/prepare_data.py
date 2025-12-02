@@ -14,7 +14,7 @@ def prepare(csv_path, out_parquet, out_stats, test_size=0.2, val_size=0.1, seed=
     - Validation: 10% (für Threshold-Tuning, client-lokal)
     - Test: 20% (für finale Evaluation, global)
     """
-    # Load Dataset from Kaggle
+    # Load Dataset from Kaggle with  253,680 survey responses, its binary so 1 is prediabetic/diabetic and 0 is not
     path = kagglehub.dataset_download("alexteboul/diabetes-health-indicators-dataset")
     csv_path = os.path.join(path, "diabetes_binary_health_indicators_BRFSS2015.csv")
     df = pd.read_csv(csv_path)
