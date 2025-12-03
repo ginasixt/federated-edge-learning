@@ -96,7 +96,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
         range="Massive"
         min_fit=$(( num_clients / 10 ))              # 10% für Training  
         if [ ${min_fit} -lt 200 ]; then min_fit=200; fi
-        min_evaluate=$(( num_clients / 2 ))        # 50% für Evaluation
+        min_evaluate=$(( num_clients * 4 / 10 ))        # 40% für Evaluation
         rounds=75
         
     else
@@ -104,7 +104,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
         range="FEL"
         min_fit=$(( num_clients / 20 ))              # 5% für Training
         if [ ${min_fit} -lt 500 ]; then min_fit=500; fi
-        min_evaluate=$(( num_clients / 20 ))
+        min_evaluate=$(( num_clients / 4 ))      # 25% für Evaluation
         if [ ${min_evaluate} -lt 2000 ]; then min_evaluate=2000; fi
         rounds=85
     fi

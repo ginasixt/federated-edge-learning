@@ -1,0 +1,241 @@
+{
+  "analysis_type": "iid_scaling",
+  "description": "IID scaling analysis - random uniform data distribution across clients",
+  "advantages": [
+    "Perfect comparability across client counts",
+    "Pure scaling effects (no confounding from data heterogeneity)",
+    "Baseline for comparing with non-IID Dirichlet results",
+    "Natural label variation due to random sampling"
+  ],
+  "created_splits": [
+    {
+      "num_clients": 2,
+      "file": "splits_iid_scaling/splits_iid_2_clients.json",
+      "avg_train_per_client": 88787.5,
+      "std_train_per_client": 0.5,
+      "min_train_per_client": 88787,
+      "max_train_per_client": 88788,
+      "avg_val_per_client": 12684.0,
+      "label_distribution_std": 0.0003145750658901103,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 4,
+      "file": "splits_iid_scaling/splits_iid_4_clients.json",
+      "avg_train_per_client": 44393.75,
+      "std_train_per_client": 0.4330127018922193,
+      "min_train_per_client": 44393,
+      "max_train_per_client": 44394,
+      "avg_val_per_client": 6342.0,
+      "label_distribution_std": 0.00041816495050761956,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 8,
+      "file": "splits_iid_scaling/splits_iid_8_clients.json",
+      "avg_train_per_client": 22196.875,
+      "std_train_per_client": 0.33071891388307384,
+      "min_train_per_client": 22196,
+      "max_train_per_client": 22197,
+      "avg_val_per_client": 3171.0,
+      "label_distribution_std": 0.001569942056247814,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 16,
+      "file": "splits_iid_scaling/splits_iid_16_clients.json",
+      "avg_train_per_client": 11098.4375,
+      "std_train_per_client": 0.49607837082461076,
+      "min_train_per_client": 11098,
+      "max_train_per_client": 11099,
+      "avg_val_per_client": 1585.5,
+      "label_distribution_std": 0.002545540252972622,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 32,
+      "file": "splits_iid_scaling/splits_iid_32_clients.json",
+      "avg_train_per_client": 5549.21875,
+      "std_train_per_client": 0.41339864235384227,
+      "min_train_per_client": 5549,
+      "max_train_per_client": 5550,
+      "avg_val_per_client": 792.75,
+      "label_distribution_std": 0.0035851486373969744,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 64,
+      "file": "splits_iid_scaling/splits_iid_64_clients.json",
+      "avg_train_per_client": 2774.609375,
+      "std_train_per_client": 0.48789046862487484,
+      "min_train_per_client": 2774,
+      "max_train_per_client": 2775,
+      "avg_val_per_client": 396.375,
+      "label_distribution_std": 0.005692436261850657,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 128,
+      "file": "splits_iid_scaling/splits_iid_128_clients.json",
+      "avg_train_per_client": 1387.3046875,
+      "std_train_per_client": 0.46027494755173237,
+      "min_train_per_client": 1387,
+      "max_train_per_client": 1388,
+      "avg_val_per_client": 198.1875,
+      "label_distribution_std": 0.00870769645855597,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 256,
+      "file": "splits_iid_scaling/splits_iid_256_clients.json",
+      "avg_train_per_client": 693.65234375,
+      "std_train_per_client": 0.4762261876838962,
+      "min_train_per_client": 693,
+      "max_train_per_client": 694,
+      "avg_val_per_client": 99.09375,
+      "label_distribution_std": 0.013348875258237114,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 512,
+      "file": "splits_iid_scaling/splits_iid_512_clients.json",
+      "avg_train_per_client": 346.826171875,
+      "std_train_per_client": 0.3789616180551592,
+      "min_train_per_client": 346,
+      "max_train_per_client": 347,
+      "avg_val_per_client": 49.546875,
+      "label_distribution_std": 0.018548740603432694,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 1024,
+      "file": "splits_iid_scaling/splits_iid_1024_clients.json",
+      "avg_train_per_client": 173.4130859375,
+      "std_train_per_client": 0.49238800324515025,
+      "min_train_per_client": 173,
+      "max_train_per_client": 174,
+      "avg_val_per_client": 24.7734375,
+      "label_distribution_std": 0.026114171888951303,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 2048,
+      "file": "splits_iid_scaling/splits_iid_2048_clients.json",
+      "avg_train_per_client": 86.70654296875,
+      "std_train_per_client": 0.45534602453511824,
+      "min_train_per_client": 86,
+      "max_train_per_client": 87,
+      "avg_val_per_client": 12.38671875,
+      "label_distribution_std": 0.03705661687300132,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 4096,
+      "file": "splits_iid_scaling/splits_iid_4096_clients.json",
+      "avg_train_per_client": 43.353271484375,
+      "std_train_per_client": 0.47798613233281584,
+      "min_train_per_client": 43,
+      "max_train_per_client": 44,
+      "avg_val_per_client": 6.193359375,
+      "label_distribution_std": 0.05235396322080965,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 8192,
+      "file": "splits_iid_scaling/splits_iid_8192_clients.json",
+      "avg_train_per_client": 21.6766357421875,
+      "std_train_per_client": 0.4677604243433502,
+      "min_train_per_client": 21,
+      "max_train_per_client": 22,
+      "avg_val_per_client": 3.0966796875,
+      "label_distribution_std": 0.07414516536492653,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 16384,
+      "file": "splits_iid_scaling/splits_iid_16384_clients.json",
+      "avg_train_per_client": 10.83831787109375,
+      "std_train_per_client": 0.368158957650894,
+      "min_train_per_client": 10,
+      "max_train_per_client": 11,
+      "avg_val_per_client": 1.54833984375,
+      "label_distribution_std": 0.10525462278946698,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 32768,
+      "file": "splits_iid_scaling/splits_iid_32768_clients.json",
+      "avg_train_per_client": 5.419158935546875,
+      "std_train_per_client": 0.493421444911027,
+      "min_train_per_client": 5,
+      "max_train_per_client": 6,
+      "avg_val_per_client": 0.774169921875,
+      "label_distribution_std": 0.14943888489222287,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 65536,
+      "file": "splits_iid_scaling/splits_iid_65536_clients.json",
+      "avg_train_per_client": 2.7095794677734375,
+      "std_train_per_client": 0.453956436993466,
+      "min_train_per_client": 2,
+      "max_train_per_client": 3,
+      "avg_val_per_client": 0.3870849609375,
+      "label_distribution_std": 0.21345432931930816,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 131072,
+      "file": "splits_iid_scaling/splits_iid_131072_clients.json",
+      "avg_train_per_client": 1.3547897338867188,
+      "std_train_per_client": 0.47844955702279635,
+      "min_train_per_client": 1,
+      "max_train_per_client": 2,
+      "avg_val_per_client": 0.19354248046875,
+      "label_distribution_std": 0.31380941123901035,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    },
+    {
+      "num_clients": 177575,
+      "file": "splits_iid_scaling/splits_iid_177575_clients.json",
+      "avg_train_per_client": 1.0,
+      "std_train_per_client": 0.0,
+      "min_train_per_client": 1,
+      "max_train_per_client": 1,
+      "avg_val_per_client": 0.14285794734619175,
+      "label_distribution_std": 0.34629334622479246,
+      "global_positive_ratio": 0.13933267633394342,
+      "paradigm": "iid_scaling"
+    }
+  ],
+  "parameters": {
+    "seed": 123,
+    "min_samples_per_client": 1,
+    "total_train_samples": 177575,
+    "total_val_samples": 25368,
+    "parquet_path": "data/diabetes.parquet",
+    "stats_path": "data/norm_stats.json"
+  },
+  "global_statistics": {
+    "positive_ratio": 0.13933267633394342,
+    "negative_ratio": 0.8606673236660566,
+    "total_samples": 177575
+  }
+}
