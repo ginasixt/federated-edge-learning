@@ -3,8 +3,8 @@
 set -euo pipefail
 
 # 🎯 IID Scaling: 2 → 177575 Clients (18 Datensätze)
-CLIENT_COUNTS=(2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 177575)
-RUNS_PER_SPLIT=3
+CLIENT_COUNTS=(512 1024 2048 4096 8192 16384 32768 65536 131072 177575)
+RUNS_PER_SPLIT=1
 
 echo "📊 IID SCALING EXPERIMENTS (18 Configurations)"
 echo "═══════════════════════════════════════"
@@ -55,9 +55,9 @@ current_experiment=0
 for num_clients in "${CLIENT_COUNTS[@]}"; do
     echo ""
     echo "════════════════════════════════════════════════════════════════════════════════"
-    echo "🎯 SCALING: ${num_clients} Clients"
+    echo "SCALING: ${num_clients} Clients"
     
-    # ✅ UPDATE options.num-supernodes in TOML
+    # update options.num-supernodes in TOML, because its not possible over run
     update_supernodes ${num_clients}
     
     # Berechne Samples pro Client
@@ -87,8 +87,8 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
         # **BEREICH 3: 1K-8K Clients (Large-Scale FL)**
         range="Large-Scale"
         min_fit=$(( num_clients / 4 ))               # 25% für Training
-        if [ ${min_fit} -lt 50 ]; then min_fit=50; fi
-        min_evaluate=$([ ${num_clients} -lt 500 ] && echo ${num_clients} || echo 500)
+        if [ ${min_fit} -lt 50 ]; then min_fit=50; fi # min 50
+        min_evaluate=$(( num_clients * 6 / 10 ))  # 60% für Evaluation, also 6000 bei 10K
         rounds=50
         
     elif [ ${num_clients} -lt 100000 ]; then
@@ -96,7 +96,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
         range="Massive"
         min_fit=$(( num_clients / 10 ))              # 10% für Training  
         if [ ${min_fit} -lt 200 ]; then min_fit=200; fi
-        min_evaluate=$([ ${num_clients} -lt 1000 ] && echo ${num_clients} || echo 1000)
+        min_evaluate=$(( num_clients / 2 ))        # 50% für Evaluation
         rounds=75
         
     else
@@ -114,7 +114,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
     split_file="splits_iid_scaling/splits_iid_${num_clients}_clients.json"
     
     echo "📋 Configuration:"
-    echo "   Range: ${range}"  # ✅ Einfache Variable statt komplexer Bedingung
+    echo "   Range: ${range}"  
     echo "   options.num-supernodes: ${num_clients} (updated in TOML)"
     echo "   split-path: ${split_file}"
     echo "   min-fit-clients: ${min_fit} ($(( (min_fit * 100) / num_clients ))% participation)"
@@ -123,7 +123,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
     echo "   rounds: ${rounds}"
     echo "   expected-samples/round: $((min_fit * samples_per_client))"
     
-    # ⚠️ Prüfe ob Split-File existiert
+    # Prüfe ob Split-File existiert
     if [ ! -f "${split_file}" ]; then
         echo "❌ Split file not found: ${split_file}"
         echo "   Run: python federated_learning/tools/create_iid_scaling_splits.py --min-samples 1"
