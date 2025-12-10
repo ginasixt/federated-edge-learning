@@ -12,7 +12,6 @@ import torch.nn as nn
 import torch.optim as optim
 from flwr.client import ClientApp, NumPyClient
 from flwr.common import Context
-from sklearn.metrics import roc_auc_score
 
 from federated_learning.task import load_prepared, make_loaders_for_indices
 
@@ -125,10 +124,7 @@ def evaluate_multi_threshold(
     probs = torch.cat(probs_all).numpy()
     y = torch.cat(y_all).numpy()
     
-    try:
-        auc = float(roc_auc_score(y, probs))
-    except:
-        auc = 0.0
+    auc = 0.0
     
     # Berechne Metriken
     thresholds = []
@@ -200,15 +196,15 @@ def evaluate(model: nn.Module, loader, crit, threshold: float) -> Tuple[float, i
             y_all.append(yb.detach().cpu())
 
     # AUC ist threshold-unabhängig
-    try:
-        if probs_all:
-            p = torch.cat(probs_all).numpy()
-            y = torch.cat(y_all).numpy()
-            auc = float(roc_auc_score(y, p))
-        else:
-            auc = 0.0
-    except Exception:
-        auc = 0.0
+    # try:
+    #     if probs_all:
+    #         p = torch.cat(probs_all).numpy()
+    #         y = torch.cat(y_all).numpy()
+    #         auc = float(roc_auc_score(y, p))
+    #     else:
+    #         auc = 0.0
+    # except Exception:
+    auc = 0.0
 
     metrics = {"tp": tp, "fp": fp, "tn": tn, "fn": fn, "auc": auc}
     avg_loss = total_loss / max(1, n_samples)
@@ -223,8 +219,8 @@ class FlowerClient(NumPyClient):
         self.cid = str(cid)
         self.rc = rc
 
-        # Lade Daten mit Train/Val/Test
-        X, y, train_idx, val_idx, test_idx = load_prepared(
+        # Lade Daten mit Train/Val, Test split ist global und wird später centralized genutzt
+        X, y, train_idx, val_idx = load_prepared(
             rc["prepared-parquet"], 
             rc["norm-stats-json"]
         )
@@ -252,7 +248,6 @@ class FlowerClient(NumPyClient):
         print(f"[Client {self.cid}] Data split:")
         print(f"   Train:      {len(client_train_idx)} samples (client-local)")
         print(f"   Validation: {len(client_val_idx)} samples (client-local)")
-        print(f"   Test:       {len(test_idx)} samples (global, shared)")
         
         tr_set = set(int(i) for i in train_idx)
         val_set = set(int(i) for i in val_idx)
@@ -264,10 +259,9 @@ class FlowerClient(NumPyClient):
         
         # DataLoader erstellen
         bs = int(rc.get("batch-size", 128))
-        self.train_loader, self.test_loader, self.val_loader = make_loaders_for_indices(
+        self.train_loader, self.val_loader = make_loaders_for_indices(
             X, y, 
             client_train_idx,  # Client-spezifisch, 
-            test_idx,          # Global
             client_val_idx,    # Client-spezifisch
             batch_size=bs
         )
@@ -388,12 +382,26 @@ class FlowerClient(NumPyClient):
         threshold_grid = json.loads(threshold_grid_str)
         
         # 3) Evaluate on local validation data with multi-threshold
-        loss, n_val, metrics = evaluate_multi_threshold(
+        if len(self.val_loader.dataset) >= 1:
+            loss, n_val, metrics = evaluate_multi_threshold(
             self.model, 
             self.val_loader,
             self.crit,
             threshold_grid
-        )
+            )
+        else:
+            # Skip evaluation if validation set is empty
+            loss = 0.0
+            n_val = 0
+            metrics = {
+            "auc": 0.0,
+            "n_samples": 0,
+            "thresholds_json": json.dumps([]),
+            "tp_json": json.dumps([]),
+            "fp_json": json.dumps([]),
+            "tn_json": json.dumps([]),
+            "fn_json": json.dumps([]),
+            }
         
         # Parse JSON für Debugging
         # thresholds = json.loads(metrics['thresholds_json'])

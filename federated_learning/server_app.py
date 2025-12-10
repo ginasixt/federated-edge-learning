@@ -227,7 +227,7 @@ def server_fn(context: Context) -> ServerAppComponents:
         """
         # Konvertiere ConfigRecord
         processed_metrics = []
-        for n, md in eval_metrics:
+        for n, md in eval_metrics:  # n = number of samples (val) and md = metrics dict
             if isinstance(md, ConfigRecord):
                 md_dict = dict(md.items())
             elif isinstance(md, dict):
@@ -235,6 +235,18 @@ def server_fn(context: Context) -> ServerAppComponents:
             else:
                 print(f"Unknown metrics type: {type(md)}")
                 continue
+            
+            # FILTER: Ignoriere Clients mit 0 Validation Samples
+            if int(n) == 0:
+                print(f"⚠️  Skipping client with n_val=0")
+                continue
+            
+            # FILTER: Ignoriere Clients mit leeren Metriken (aus deinem Client-Fallback)
+            n_samples = md_dict.get("n_samples", 0)
+            if int(n_samples) == 0:
+                print(f"⚠️  Skipping client with n_samples=0 in metrics")
+                continue
+            
             processed_metrics.append((n, md_dict))
         
         # 1) AUC aggregieren
@@ -242,10 +254,8 @@ def server_fn(context: Context) -> ServerAppComponents:
         total_weight_for_auc = 0
         
         for n, md in processed_metrics:
-            if not isinstance(md, dict):
-                continue
             auc = md.get("auc", None)
-            if auc is not None:
+            if auc is not None and auc > 0:  # ✅ Ignoriere auc=0.0
                 w = int(n) if n else 1
                 auc_weighted_sum += float(auc) * w
                 total_weight_for_auc += w
@@ -256,9 +266,6 @@ def server_fn(context: Context) -> ServerAppComponents:
         threshold_aggregated = {}
         
         for n, md in processed_metrics:
-            if not isinstance(md, dict):
-                continue
-            
             #  Parse JSON-Strings zu Listen
             try:
                 thresholds = json.loads(md.get("thresholds_json", "[]"))
@@ -340,6 +347,7 @@ def server_fn(context: Context) -> ServerAppComponents:
         # 5) Logging
         print(f"\n🎯 Multi-Threshold Aggregation:")
         print(f"   ═══════════════════════════════════════════════")
+        print(f"   ✅ Valid clients: {len(processed_metrics)}")  # ✅ NEU
         print(f"   Evaluated {len(threshold_results)} thresholds:")
         
         for result in threshold_results[:3]:

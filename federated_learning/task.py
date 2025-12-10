@@ -25,7 +25,6 @@ def load_prepared(parquet_path: str, stats_path: str):
     tgt = meta["target"]
     tr_idx = np.array(meta["train_idx"])
     val_idx = np.array(meta["val_idx"])
-    te_idx = np.array(meta["test_idx"])
     mean = meta["mean"]
     std = meta["std"]
 
@@ -49,31 +48,34 @@ def load_prepared(parquet_path: str, stats_path: str):
     #   Diagnosis: 0=gesund+1=prä (neg), 2=diabetes (pos)
     # or a multiclass classification (0,1,2), but we will use our AI for screening.
 
-    return X_all, y_all, tr_idx, val_idx, te_idx
+    return X_all, y_all, tr_idx, val_idx
 
-def make_loaders_for_indices(X, y, train_indices, test_indices, val_indices, batch_size=128):
+def make_loaders_for_indices(X, y, train_indices, val_indices, batch_size=128):
     """
     Erstellt DataLoader für Train, Validation und Test.
     Args:
         X: Feature-Matrix (numpy array)
         y: Zielvariable (numpy array)
         train_indices: Indizes für Trainingsdaten
-        test_indices: Indizes für Testdaten
         val_indices: Indizes für Validierungsdaten
         batch_size: Batch-Größe für Trainings-DataLoader
     
     Returns:
-        Tuple mit drei DataLoadern: (train_loader, test_loader, val_loader)
+        Tuple mit zwei DataLoadern: (train_loader, val_loader)
     """
     Xtr, ytr = torch.tensor(X[train_indices]), torch.tensor(y[train_indices])
     Xval, yval = torch.tensor(X[val_indices]), torch.tensor(y[val_indices])
-    Xte, yte = torch.tensor(X[test_indices]), torch.tensor(y[test_indices])
 
     tr = TensorDataset(Xtr, ytr)
     val = TensorDataset(Xval, yval)
-    te = TensorDataset(Xte, yte)
     return (
         DataLoader(tr, batch_size=batch_size, shuffle=True),
-        DataLoader(te, batch_size=1024, shuffle=False),
         DataLoader(val, batch_size=1024, shuffle=False),
     )
+
+    # Xte, yte = torch.tensor(X[test_indices]), torch.tensor(y[test_indices])
+    # te = TensorDataset(Xte, yte)
+
+    # return (
+    #     DataLoader(te, batch_size=1024, shuffle=False),
+    # )
