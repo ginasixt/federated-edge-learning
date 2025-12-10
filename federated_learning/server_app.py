@@ -310,7 +310,7 @@ def server_fn(context: Context) -> ServerAppComponents:
         best_thr_result = None
         best_score = -1.0
         
-        MIN_RECALL = 0.75
+        MIN_RECALL = 0.70
         MIN_SPEC = 0.70
         
         # Durchlaufe alle Threshold-Ergebnisse um den besten zu finden

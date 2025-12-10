@@ -13,7 +13,7 @@ import torch.optim as optim
 from flwr.client import ClientApp, NumPyClient
 from flwr.common import Context
 
-from federated_learning.task import load_prepared, make_loaders_for_indices
+from federated_learning.task import load_client_data, make_loaders_from_arrays
 
 # wählt GPU, sonst CPU
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -218,21 +218,16 @@ class FlowerClient(NumPyClient):
         # Client-ID, Run-Config von client_fn
         self.cid = str(cid)
         self.rc = rc
-
-        # Lade Daten mit Train/Val, Test split ist global und wird später centralized genutzt
-        X, y, train_idx, val_idx = load_prepared(
-            rc["prepared-parquet"], 
-            rc["norm-stats-json"]
-        )
-
-        # Split-JSON lesen und passende Indizes auswählen
+        
+        # 1. Split-Mapping laden
         split_path = rc.get("split-path")
         if not split_path:
             raise RuntimeError("run_config['split-path'] fehlt.")
         
-        split_data = json.loads(open(split_path, "r").read())
+        with open(split_path, "r") as f:
+            split_data = json.load(f)
         
-        # Extrahiere Train UND Val Mappings
+        # 2. Client-spezifische Indices/ Row IDs extrahieren
         train_mapping = split_data.get("train", {})
         val_mapping = split_data.get("val", {})
         
@@ -244,41 +239,34 @@ class FlowerClient(NumPyClient):
         # Client-spezifische Indices
         client_train_idx = train_mapping[self.cid]
         client_val_idx = val_mapping[self.cid]
-        
+
         print(f"[Client {self.cid}] Data split:")
         print(f"   Train:      {len(client_train_idx)} samples (client-local)")
         print(f"   Validation: {len(client_val_idx)} samples (client-local)")
         
-        tr_set = set(int(i) for i in train_idx)
-        val_set = set(int(i) for i in val_idx)
+        # 3. Lade Daten + Class-Weights (global berechnet, nicht für echtes FEL scenario :( )
+        boost_factor = float(rc.get("pos-weight-boost", 2.0))
         
-        if not all(int(i) in tr_set for i in client_train_idx):
-            raise ValueError(f"Client {self.cid}: Train indices außerhalb des globalen Train-Splits.")
-        if not all(int(i) in val_set for i in client_val_idx):
-            raise ValueError(f"Client {self.cid}: Val indices außerhalb des globalen Val-Splits.")
-        
-        # DataLoader erstellen
-        bs = int(rc.get("batch-size", 128))
-        self.train_loader, self.val_loader = make_loaders_for_indices(
-            X, y, 
-            client_train_idx,  # Client-spezifisch, 
-            client_val_idx,    # Client-spezifisch
-            batch_size=bs
+        X_train, y_train, X_val, y_val, class_weights = load_client_data(
+            parquet_path=rc["prepared-parquet"],
+            stats_path=rc["norm-stats-json"],
+            train_row_ids=client_train_idx,
+            val_row_ids=client_val_idx,
+            boost_factor=boost_factor,
+            use_cache=True 
         )
         
-        # Modell + Loss (wie vorher)
-        self.model = MLP(in_dim=X.shape[1]).to(DEVICE)
-
-        # Class-Weights aus *globalem* Train-Split (nicht client-lokal)
-        y_train_global = y[train_idx]
-        pos = int((y_train_global == 1).sum())
-        neg = int((y_train_global == 0).sum())
-        tot = max(1, pos + neg)
-        # Boost positive class weight for higher recall (configurable)
-        boost_factor = float(rc.get("pos-weight-boost", 2.0))  # default 2.0
-        w_pos = (neg / tot) * boost_factor
-        w_neg = pos / tot
-        class_weights = torch.tensor([w_neg, w_pos], dtype=torch.float32, device=DEVICE)
+        # 4. DataLoader erstellen
+        bs = int(rc.get("batch-size", 128))
+        self.train_loader, self.val_loader = make_loaders_from_arrays(
+            X_train, y_train, X_val, y_val, batch_size=bs
+        )
+        
+        # 5. Modell
+        self.model = MLP(in_dim=X_train.shape[1]).to(DEVICE)
+        
+        # 6. Loss mit Class-Weights (bereits auf CPU, muss nur zu GPU)
+        class_weights = class_weights.to(DEVICE)
         
         use_focal = rc.get("use-focal-loss", False)
         if use_focal:
@@ -287,7 +275,7 @@ class FlowerClient(NumPyClient):
         else:
             self.crit = nn.CrossEntropyLoss(weight=class_weights)
 
-        # Defaults / eval threshold
+        # 7. Defaults
         self.default_lr = float(rc.get("lr", 1e-2))
         
         # Anzahl der lokalen Epochen aus config, (default 1)
@@ -298,7 +286,6 @@ class FlowerClient(NumPyClient):
         self.eval_threshold = float(rc.get("eval-threshold", 0.35))
 
 
-    
      # FOR EVERY ROUND THE FOLLOWING METHODS ARE CALLED:
      # 1) fit is called to train the model locally for each client
          # 1) the current weights are set

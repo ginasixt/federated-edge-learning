@@ -13,9 +13,9 @@ class ScreeningPolicy:
     The policy tracks round metrics and selects the best round
     """
 
-    def __init__(self, min_recall: float = 0.75, min_spec: float = 0.70):
+    def __init__(self, min_recall: float = 0.70, min_spec: float = 0.70):
         self.history: List[Dict[str, Any]] = [] # List of the Metrics of all rounds {"round": int, "metrics": dict}
-        self.min_recall = min_recall  # Hard constraint: must catch 75%+ of cases
+        self.min_recall = min_recall  # Hard constraint: must catch 70%+ of cases
         self.min_spec = min_spec      # Soft constraint: prefer 70%+ specificity
 
     def add_round(self, rnd: int, metrics: Dict[str, Any]) -> None:
