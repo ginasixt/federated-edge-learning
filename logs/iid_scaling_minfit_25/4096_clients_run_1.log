@@ -1,0 +1,58 @@
+Loading project configuration... 
+Success
+[92mINFO [0m:      Starting Flower ServerApp, config: num_rounds=50, no round_timeout
+[92mINFO [0m:      
+[92mINFO [0m:      [INIT]
+[92mINFO [0m:      Requesting initial parameters from one random client
+/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/ray/_private/worker.py:2051: FutureWarning: Tip: In future versions of Ray, Ray will no longer override accelerator visible devices env var if num_gpus=0 or num_gpus=None (default). To enable this behavior and turn off this error message, set RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
+  warnings.warn(
+[92mINFO [0m:      Received initial parameters from one random client
+[92mINFO [0m:      Starting evaluation of initial global parameters
+[92mINFO [0m:      Evaluation returned no results (`None`)
+[92mINFO [0m:      
+[92mINFO [0m:      [ROUND 1]
+[92mINFO [0m:      configure_fit: strategy sampled 3276 clients (out of 4096)
+[36m(pid=gcs_server)[0m [2025-12-03 16:42:34,483 E 1158770 1158770] (gcs_server) gcs_server.cc:302: Failed to establish connection to the event+metrics exporter agent. Events and metrics will not be exported. Exporter agent status: RpcError: Running out of retries to initialize the metrics agent. rpc_code: 14
+[33m(raylet)[0m [2025-12-03 16:42:36,479 E 1159027 1159027] (raylet) main.cc:975: Failed to establish connection to the metrics exporter agent. Metrics will not be exported. Exporter agent status: RpcError: Running out of retries to initialize the metrics agent. rpc_code: 14
+[2025-12-03 16:42:37,858 E 1158608 1159176] core_worker_process.cc:825: Failed to establish connection to the metrics exporter agent. Metrics will not be exported. Exporter agent status: RpcError: Running out of retries to initialize the metrics agent. rpc_code: 14
+[36m(ClientAppActor pid=1165789)[0m [2025-12-03 16:42:38,677 E 1165789 1168894] core_worker_process.cc:825: Failed to establish connection to the metrics exporter agent. Metrics will not be exported. Exporter agent status: RpcError: Running out of retries to initialize the metrics agent. rpc_code: 14
+[36m(ClientAppActor pid=1167545)[0m [2025-12-03 16:42:39,301 E 1167545 1173296] core_worker_process.cc:825: Failed to establish connection to the metrics exporter agent. Metrics will not be exported. Exporter agent status: RpcError: Running out of retries to initialize the metrics agent. rpc_code: 14[32m [repeated 55x across cluster][0m
+[91mERROR [0m:     An exception was raised when processing a message by RayBackend
+[91mERROR [0m:     Broken pipe
+[91mERROR [0m:     Traceback (most recent call last):
+  File "/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/flwr/server/superlink/fleet/vce/vce_api.py", line 128, in worker
+    out_mssg, updated_context = backend.process_message(message, context)
+                                ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/flwr/server/superlink/fleet/vce/backend/raybackend.py", line 189, in process_message
+    raise ex
+  File "/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/flwr/server/superlink/fleet/vce/backend/raybackend.py", line 176, in process_message
+    ) = self.pool.fetch_result_and_return_actor_to_pool(future)
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/flwr/simulation/ray_transport/ray_actor.py", line 479, in fetch_result_and_return_actor_to_pool
+    _, out_mssg, updated_context = ray.get(future)
+                                   ~~~~~~~^^^^^^^^
+  File "/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/ray/_private/auto_init_hook.py", line 22, in auto_init_wrapper
+    return fn(*args, **kwargs)
+  File "/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/ray/_private/client_mode_hook.py", line 104, in wrapper
+    return func(*args, **kwargs)
+  File "/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/ray/_private/worker.py", line 2961, in get
+    values, debugger_breakpoint = worker.get_objects(
+                                  ~~~~~~~~~~~~~~~~~~^
+        object_refs, timeout=timeout, _tensor_transport=_tensor_transport
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/bax9142/federated-edge-learning/.venv/lib64/python3.13/site-packages/ray/_private/worker.py", line 998, in get_objects
+    ] = self.core_worker.get_objects(
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        object_refs,
+        ^^^^^^^^^^^^
+        timeout_ms,
+        ^^^^^^^^^^^
+    )
+    ^
+  File "python/ray/_raylet.pyx", line 3141, in ray._raylet.CoreWorker.get_objects
+  File "python/ray/includes/common.pxi", line 107, in ray._raylet.check_status
+OSError: Broken pipe
+
+[2025-12-03 16:43:07,665 E 1158608 1165805] core_worker_process.cc:972: The core worker has already been shutdown. This happens when the language frontend accesses the Ray's worker after it is shutdown. The process will exit
