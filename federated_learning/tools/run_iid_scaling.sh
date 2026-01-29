@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # federated_learning/tools/run_iid_scaling_fixed.sh
+
+# Run with:
+# ./federated_learning/tools/run_iid_scaling.sh
+
 set -euo pipefail
 
-# 🎯 IID Scaling: 2 → 177575 Clients (18 Datensätze)
-CLIENT_COUNTS=(512 1024 2048 4096 8192 16384 32768 65536 131072 177575)
+# IID Scaling: 2 → 177575 Clients (18 Datensätze)
+CLIENT_COUNTS=(65536)
 RUNS_PER_SPLIT=1
 
 echo "📊 IID SCALING EXPERIMENTS (18 Configurations)"
@@ -78,7 +82,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
     elif [ ${num_clients} -lt 1000 ]; then
         # **BEREICH 2: 100-512 Clients (Mid-Scale FL)**  
         range="Mid-Scale"
-        min_fit=$(( (num_clients * 6 + 9) / 10 ))   # 60% für Training
+        min_fit=$(( (num_clients * 6 + 9) / 10 ))   # 60% für Training TODO: nochmal teste wie es mit 80% ausschaut
         if [ ${min_fit} -lt 10 ]; then min_fit=10; fi
         min_evaluate=$([ ${num_clients} -lt 100 ] && echo ${num_clients} || echo 100)
         rounds=30
@@ -86,18 +90,16 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
     elif [ ${num_clients} -lt 10000 ]; then
         # **BEREICH 3: 1K-8K Clients (Large-Scale FL)**
         range="Large-Scale"
-        min_fit=$(( num_clients / 4 ))               # 25% für Training
-        if [ ${min_fit} -lt 50 ]; then min_fit=50; fi # min 50
+        min_fit=$(( num_clients * 8 / 10 ))               # 80% für Training
         min_evaluate=$(( num_clients * 6 / 10 ))  # 60% für Evaluation, also 6000 bei 10K
         rounds=50
         
     elif [ ${num_clients} -lt 100000 ]; then
         # **BEREICH 4: 10K-65K Clients (Massive FL)** 
         range="Massive"
-        min_fit=$(( num_clients / 10 ))              # 10% für Training  
-        if [ ${min_fit} -lt 200 ]; then min_fit=200; fi
-        min_evaluate=$(( num_clients * 4 / 10 ))        # 40% für Evaluation
-        rounds=75
+        min_fit=$(( num_clients * 6 / 10 ))  # 60% für Training  
+        min_evaluate=$(( num_clients * 8 / 10 ))        # 80% für Evaluation
+        rounds=80
         
     else
         # **BEREICH 5: 100K+ Clients (Federated Edge Learning)**

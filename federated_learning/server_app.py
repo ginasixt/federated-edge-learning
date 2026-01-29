@@ -7,7 +7,6 @@ from flwr.server import ServerApp, ServerConfig
 from flwr.server.strategy import FedAvg
 from flwr.common import Context, Parameters, FitRes, ndarrays_to_parameters, parameters_to_ndarrays
 from flwr.common.record import ConfigRecord
-from federated_learning.screening_policy import ScreeningPolicy
 from federated_learning.client_app import MLP
 import json
 import numpy as np
@@ -28,7 +27,6 @@ class FedAvgWithScreening(FedAvg):
     
     def __init__(
         self,
-        screening_policy: ScreeningPolicy,
         checkpoint_dir: Path,
         model_dim: int,  # Feature-Dimension für MLP
         run_config: dict,
@@ -36,7 +34,6 @@ class FedAvgWithScreening(FedAvg):
         **kwargs
     ):
         super().__init__(*args, **kwargs)
-        self.screening = screening_policy
         self.checkpoint_dir = checkpoint_dir
         self.model_dim = model_dim
         self.run_config = run_config
@@ -80,45 +77,49 @@ class FedAvgWithScreening(FedAvg):
         results: list[tuple[any, any]],
         failures: list[tuple[any, any] | BaseException],
     ) -> tuple[float | None, dict[str, any]]:
-        """
-        Nach Evaluation: Prüfe ob beste Runde und speichere nach Eval beste Runde Checkpoint.
-        """
+        """Nach Evaluation: Prüfe ob beste Runde und speichere Checkpoint."""
         
-        # 1) Standard Aggregation (ruft evaluate_metrics_aggregation_fn auf)
-        loss, metrics = super().aggregate_evaluate(server_round, results, failures)
+        # ✅ 1) Early Exit: Keine Results 
+        if not results:
+            return None, {}
         
-        if metrics is None:
+        # ✅ 2) Filtering: Nur Clients mit n_val > 0 
+        valid_results = []
+        for client_proxy, evaluate_res in results:
+            if evaluate_res.num_examples > 0:
+                valid_results.append((client_proxy, evaluate_res))
+        
+        # ✅ 3) Check: Alle n_val=0?
+        if not valid_results:
+            print(f"⏭️  Round {server_round}: Evaluation skipped (all n_val=0)")
+            return None, {}
+        
+        # ✅ 4) Standard Aggregation 
+        loss, metrics = super().aggregate_evaluate(server_round, valid_results, failures)
+        
+        if not metrics:
             return loss, {}
         
-        # 2) Füge Metriken zu Screening hinzu
-        self.screening.add_round(server_round, metrics)
-        
-        # 3) Prüfe ob diese Runde die beste ist
-        best = self.screening.best()
-        
-        if best and best["round"] == server_round:
-            print(f"\n✅ Round {server_round} is NEW BEST - Saving checkpoint...")
-            
-            # Hole Parameters aus RAM-Cache
-            if server_round not in self.parameters_cache:
-                print(f"⚠️  Warning: Parameters for round {server_round} not in cache!")
-                return loss, metrics
-            
-            parameters = self.parameters_cache[server_round]
-            
+        # ✅ 5) Speichere JEDE evaluierte Runde (für Post-Training Screening)
+        if server_round in self.parameters_cache:
             # Speichere Checkpoint
             checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}.pt"
-            self._save_checkpoint(server_round, parameters, checkpoint_path)
+            self._save_checkpoint(server_round, self.parameters_cache[server_round], checkpoint_path)
             
-            # Update JSON mit Checkpoint-Path
-            best["model_checkpoint"] = str(checkpoint_path)
+            # Speichere Metriken als JSON
+            run_tag = str(self.run_config.get("run-tag", "1"))
+            json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
             
-            run_tag = str(self.run_config.get("run-tag", "none"))
-            json_path = self.checkpoint_dir / f"run_{run_tag}.json"
-            self.screening.save_best(str(json_path))
+            metrics_with_meta = {
+                "round": server_round,
+                "metrics": metrics,
+                "model_checkpoint": str(checkpoint_path)
+            }
             
-            print(f"   💾 Best model saved: {checkpoint_path}")
-            print(f"   📊 Metrics saved: {json_path}")
+            with open(json_path, "w") as f:
+                json.dump(metrics_with_meta, f, indent=2)
+            
+            print(f"💾 Round {server_round}: Saved {checkpoint_path.name} + {json_path.name}")
         
         return loss, metrics
     
@@ -163,24 +164,25 @@ class FedAvgWithScreening(FedAvg):
 # udn geben ServerAppComponents(config, strategy) zurück.
 # Ab dann orchestriert Flower die Runden (Sampling, Fit, Evaluate).
 def server_fn(context: Context) -> ServerAppComponents:
-    """Build strategy + config. FedAvg + multi-threshold optimization + che"""
+    """Build strategy + config. FedAvg + multi-threshold optimization + checkpointing"""
     rc = dict(context.run_config)
     
-    # Screening-Policy (OHNE round_counter!)
-    screening = ScreeningPolicy()
-    
-    # Checkpoint-Verzeichnis
-    checkpoint_dir = Path(f"result/{rc.get('split-path','default')}/multi_thr/")
+    # Checkpoint-Verzeichnis (alle Runden für Post-Training Screening)
+    checkpoint_dir = Path(f"result/{rc.get('split-path','default')}/all_rounds/")
     
     # Model-Dimension (aus prepared data)
     model_dim = 21  # Deine Feature-Anzahl (kannst du auch dynamisch laden)
-    
+
+    total_rounds = int(rc.get("num-server-rounds", 80))
+
     # Threshold-Grid
     threshold_grid = [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
+    
     
     def on_fit_config_fn(rnd: int) -> dict:
         """Config für Training"""
         lr = float(rc.get("lr", 1e-2)) if rnd < 3 else float(rc.get("lr-after", 5e-3))
+        
         return {
             "epochs": int(rc.get("local-epochs", 1)),
             "lr": lr,
@@ -190,7 +192,35 @@ def server_fn(context: Context) -> ServerAppComponents:
         }
     
     def on_evaluate_config_fn(rnd: int) -> dict:
-        """Config für Evaluation"""
+        """
+        ADAPTIVE Evaluation Schedule:
+        - Runden 1-40: Alle 10 Runden (Warmup/Early Training)
+        - Runden 41-65: Alle 5 Runden (Mid Training)
+        - Runden 66+: JEDE Runde (Critical Convergence Phase)
+        - Runde 1 & letzte Runde: IMMER evaluieren
+        """
+        # Erste und letzte Runde IMMER evaluieren
+        if rnd == 1 or rnd == total_rounds:
+            pass  # Evaluation läuft
+        
+        # Runden 1-70: Alle 10 Runden
+        elif rnd <= 70:
+            if rnd % 10 != 0:
+                return {}  # Skip Evaluation, senden leere Config, also kein threshold grid
+        
+        
+        
+        # Runden 41-70: Alle 5 Runden
+        # elif rnd <= 70:
+        #     if rnd % 5 != 0:
+        #         return {}  # Skip Evaluation
+        
+        # Runden 66+: Jede Runde (kritische Konvergenz-Phase)
+        # Kein Skip nötig
+        
+        # ✅ Threshold Grid (nur wenn Eval läuft)
+        threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
+        
         return {
             "threshold_grid": json.dumps(threshold_grid),
         }
@@ -306,69 +336,23 @@ def server_fn(context: Context) -> ServerAppComponents:
             metrics["threshold"] = thr
             threshold_results.append(metrics)
         
-        # 4) Wähle besten Threshold
-        best_thr_result = None
-        best_score = -1.0
-        
-        MIN_RECALL = 0.70
-        MIN_SPEC = 0.70
-        
-        # Durchlaufe alle Threshold-Ergebnisse um den besten zu finden
-        for result in threshold_results:
-            recall = result["recall"]
-            spec = result["spec"]
-            f1 = result["f1"]
-            
-            # 4.1) Filtere nach MIN_RECALL
-            if recall < MIN_RECALL:
-                continue
-            
-            # 4.2) Spec Penalty is calculated if spec is below MIN_SPEC
-            spec_penalty = 0.0 if spec >= MIN_SPEC else (MIN_SPEC - spec) * 0.5
-            
-            # 4.3) Score Berechnung
-            score = (
-                0.40 * recall +     # Recall wichtigster Faktor
-                0.30 * spec +       # Spec auch 
-                0.20 * f1 +
-                0.10 * (1.0 - spec_penalty) 
-            )
-            
-            # 4.4) Wähle basierend auf bestem Score den Threshold
-            if score > best_score:
-                best_score = score
-                best_thr_result = result
-        
-        # Falls kein Threshold MIN_RECALL erfüllt, wähle besten Youden-Index
-        if best_thr_result is None:
-            print(f"⚠️  No threshold meets min_recall={MIN_RECALL}, using best youden index.")
-            best_thr_result = max(threshold_results, key=lambda x: x["youden"])
-        
-        # 5) Logging
-        print(f"\n🎯 Multi-Threshold Aggregation:")
-        print(f"   ═══════════════════════════════════════════════")
-        print(f"   ✅ Valid clients: {len(processed_metrics)}")  # ✅ NEU
+        # 4) Minimales Logging (für Live-Monitoring während Training)
+        print(f"\n📊 Multi-Threshold Aggregation:")
+        print(f"   Valid clients: {len(processed_metrics)}")
         print(f"   Evaluated {len(threshold_results)} thresholds:")
         
         for result in threshold_results[:3]:
-            print(f"     • Thr={result['threshold']:.2f}: "
-                  f"Recall={result['recall']:.3f}, Spec={result['spec']:.3f}, F1={result['f1']:.3f}")
+            print(f"     Thr={result['threshold']:.2f}: "
+                  f"Rec={result['recall']:.3f}, Spec={result['spec']:.3f}, F1={result['f1']:.3f}")
         
-        print(f"   ...")
-        print(f"\n   BEST Threshold: {best_thr_result['threshold']:.2f}")
-        print(f"     • Recall:      {best_thr_result['recall']:.3f}")
-        print(f"     • Specificity: {best_thr_result['spec']:.3f}")
-        print(f"     • F1-Score:    {best_thr_result['f1']:.3f}")
-        print(f"     • Score:       {best_score:.3f}")
-        print(f"   ═══════════════════════════════════════════════\n")
+        if len(threshold_results) > 3:
+            print(f"     ... (+ {len(threshold_results)-3} more)\n")
         
-        # Verwenden metrics_aggregated als Träger
-        agg = dict(best_thr_result)
-        agg["auc"] = aggregated_auc
-        agg["best_threshold"] = best_thr_result["threshold"]
-        agg["best_score"] = best_score
-        
-        return agg
+        # 5) Gib ALLE Threshold-Ergebnisse zurück (Post-Training Screening wählt beste)
+        return {
+            "auc": aggregated_auc,
+            "all_thresholds": threshold_results  # Alle Thresholds für Screening-Tool
+        }
     
     def fit_metrics_aggregation_fn(metrics):
         """Aggregiere Fit-Metriken."""
@@ -378,7 +362,6 @@ def server_fn(context: Context) -> ServerAppComponents:
     
     # ✅ Eine saubere Strategy-Klasse
     strategy = FedAvgWithScreening(
-        screening_policy=screening,
         checkpoint_dir=checkpoint_dir,
         model_dim=model_dim,
         run_config=rc,

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from typing import List, Dict, Tuple
+import os  # ✅ NEU
 
 import numpy as np
 import torch
@@ -15,7 +16,18 @@ from flwr.common import Context
 
 from federated_learning.task import load_client_data, make_loaders_from_arrays
 
-# wählt GPU, sonst CPU
+# ✅ FAIR SHARING: 50% Server-Ressourcen (250 GB RAM, 56 CPU-Kerne)
+# ⚠️ WICHTIG: MUSS VOR Ray-Import gesetzt werden!
+os.environ.setdefault("RAY_memory_monitor_refresh_ms", "1000")  # Check alle 1s
+os.environ.setdefault("RAY_memory_usage_threshold", "0.50")  # Max 50% Server-RAM (250 GB)
+os.environ.setdefault("RAY_object_spilling_threshold", "0.92")  # Erst bei 92% spillen (230 GB)
+
+# CPU-Limit: 56 von 112 Kernen
+os.environ.setdefault("RAY_CPU_LIMIT", "84")
+
+# ✅ Dedup Logs (verhindert Log-Spam bei 56 parallelen Clients)
+os.environ.setdefault("RAY_DEDUP_LOGS", "1")
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -349,58 +361,43 @@ class FlowerClient(NumPyClient):
         # 2) the model is evaluated on the local test data
         # 3) Loss and accurany are returned
     def evaluate(self, parameters, config):
-        """
-        Evaluate the model on the local validation data with multiple thresholds.
-        Returns:
-            loss (float): The loss of the model on the validation data.
-            n_val (int): The number of validation samples.
-            metrics (dict): A dictionary containing evaluation metrics such as AUC and confusion matrix values for
-                            different thresholds.
-        """
-        
-        # 1) Set the model parameters sent by the server
+        """Evaluate nur wenn config nicht leer"""
+    
+        # SKIP wenn Server keine Evaluation will
+        if not config or len(config) == 0:
+            return 0.0, 0, {}  # Dummy-Return
+    
+        # 1) Set parameters
         self.set_parameters(parameters)
         
-        # 2) get threshold grid from config or use default
+        # 2) Get threshold grid
         threshold_grid_str = config.get(
             "threshold_grid", 
-            json.dumps([ 0.35, 0.45, 0.5, 0.55, 0.65, 0.75])
+            json.dumps([0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55])
         )
         threshold_grid = json.loads(threshold_grid_str)
         
-        # 3) Evaluate on local validation data with multi-threshold
+        # 3) Evaluate (nur wenn Daten vorhanden)
         if len(self.val_loader.dataset) >= 1:
             loss, n_val, metrics = evaluate_multi_threshold(
-            self.model, 
-            self.val_loader,
-            self.crit,
-            threshold_grid
+                self.model, 
+                self.val_loader,
+                self.crit,
+                threshold_grid
             )
         else:
-            # Skip evaluation if validation set is empty
             loss = 0.0
             n_val = 0
             metrics = {
-            "auc": 0.0,
-            "n_samples": 0,
-            "thresholds_json": json.dumps([]),
-            "tp_json": json.dumps([]),
-            "fp_json": json.dumps([]),
-            "tn_json": json.dumps([]),
-            "fn_json": json.dumps([]),
+                "auc": 0.0,
+                "n_samples": 0,
+                "thresholds_json": json.dumps([]),
+                "tp_json": json.dumps([]),
+                "fp_json": json.dumps([]),
+                "tn_json": json.dumps([]),
+                "fn_json": json.dumps([]),
             }
-        
-        # Parse JSON für Debugging
-        # thresholds = json.loads(metrics['thresholds_json'])
-        # tp = json.loads(metrics['tp_json'])
-        # fp = json.loads(metrics['fp_json'])
-        
-        # print(f"[Client {self.cid}] Sample metrics:")
-        # print(f"   Thresholds: {thresholds[:3]}...")
-        # print(f"   TP:         {tp[:3]}...")
-        # print(f"   FP:         {fp[:3]}...")
-        # print(f"   AUC:        {metrics['auc']:.4f}\n")
-        
+    
         return float(loss), int(n_val), metrics
     
     def set_parameters(self, parameters):

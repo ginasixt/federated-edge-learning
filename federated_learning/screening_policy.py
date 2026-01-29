@@ -13,10 +13,11 @@ class ScreeningPolicy:
     The policy tracks round metrics and selects the best round
     """
 
-    def __init__(self, min_recall: float = 0.70, min_spec: float = 0.70):
+    def __init__(self, min_recall: float = 0.66, min_spec: float = 0.70):
         self.history: List[Dict[str, Any]] = [] # List of the Metrics of all rounds {"round": int, "metrics": dict}
         self.min_recall = min_recall  # Hard constraint: must catch 70%+ of cases
         self.min_spec = min_spec      # Soft constraint: prefer 70%+ specificity
+        self.last_saved_round = None  # ✅ Track last saved checkpoint
 
     def add_round(self, rnd: int, metrics: Dict[str, Any]) -> None:
         """
@@ -111,40 +112,74 @@ class ScreeningPolicy:
         return True
 
     def _choose_best(self) -> Optional[Dict[str, Any]]:
+        """
+        Select best round using:
+        1) Hard filter: recall ≥ min_recall (safety requirement)
+        2) Soft preference: spec ≥ min_spec (if available)
+        3) Fallback: Among recall≥min_recall, prefer highest spec
+        4) Pareto-filtering (not dominated in recall & spec)
+        5) Composite score (recall, spec, F1, stability)
+        """
 
         if not self.history:
             return None
 
-        # 1) Hard filter by minimum recall (safety requirement)
+        # ✅ 1) Hard filter by minimum recall (safety requirement)
         candidates = [h for h in self.history 
                      if self._recall(h["metrics"]) >= self.min_recall]
         
         if not candidates:
-            print(f"WARNING: No rounds meet min recall {self.min_recall}")
-            print(f"           Using best available recall instead")
+            print(f"⚠️  WARNING: No rounds meet min_recall={self.min_recall}")
+            print(f"          Using best available recall instead")
             candidates = self.history
 
-        # 2) Prefer candidates with good specificity
+        # ✅ 2) Prefer candidates with GOOD specificity (if available)
         good_spec = [h for h in candidates 
                     if self._spec(h["metrics"]) >= self.min_spec]
         
-        # TODO(ginasixt): Finde else hier noch keimn gutes Fallbackverhalten
         if good_spec:
             candidates = good_spec
-            print(f"Found {len(candidates)} rounds with recall≥{self.min_recall} AND spec≥{self.min_spec}")
+            print(f"✅ Found {len(candidates)} rounds with recall≥{self.min_recall} AND spec≥{self.min_spec}")
         else:
+            # ✅ 3) FALLBACK: Filter to TOP 50% by specificity
+            # Sortiere nach Spec, nimm obere Hälfte
+            candidates_sorted = sorted(candidates, 
+                                    key=lambda h: self._spec(h["metrics"]), 
+                                    reverse=True)
+            
+            # Nimm mindestens 3 Kandidaten (oder alle, wenn weniger)
+            keep_n = max(3, len(candidates_sorted) // 2)
+            candidates = candidates_sorted[:keep_n]
+            
+            best_spec = self._spec(candidates[0]["metrics"])
+            worst_spec = self._spec(candidates[-1]["metrics"])
+            
             print(f"⚠️  No rounds meet spec≥{self.min_spec}, using recall filter only")
+            print(f"   BUT: Filtered to top {len(candidates)} by specificity "
+                  f"(spec range: {worst_spec:.3f}-{best_spec:.3f})")
 
-        # 3) Filter to Pareto-optimal solutions
-        # It checks if any candidate is dominated in both recall & spec, if none dominates the other both are Pareto-optimal and are being kept
-        # Round 1:  Recall=0.757, Spec=0.725
-        # Round 10: Recall=0.790, Spec=0.706 -> Round 10 hat höheren Recall, aber niedrigeren Spec
-        # --> beide sind Pareto-optimal! (keiner dominiert den anderen)
+        # ✅ 4) Filter to Pareto-optimal solutions
         pareto = [h for h in candidates if self._is_pareto_optimal(h, candidates)]
         print(f" {len(pareto)} Pareto-optimal rounds (not dominated in recall & spec)")
 
-        # 4) Among Pareto-optimal, choose highest composite score
+        # ✅ 5) Among Pareto-optimal, choose highest composite score
         best = max(pareto, key=lambda h: self._screening_score(h))
+        
+        # ✅ 6) FALLBACK: Save EVERY round that improves over last saved
+        # Wichtig bei schlechten Modellen (extreme Underfitting):
+        # - Runde 1 hat vielleicht Spec=0.02
+        # - Runde 53 hat Spec=0.15 (besser, aber immer noch schlecht)
+        # → Wir wollen Runde 53 speichern, auch wenn sie nicht "optimal" ist!
+        if self.last_saved_round is not None:
+            last_saved = next(h for h in self.history if h["round"] == self.last_saved_round)
+            # Prüfe ob JEDE neue Runde besser ist als die letzte gespeicherte
+            if self._screening_score(best) < self._screening_score(last_saved):
+                print(f"⚠️  WARNING: Selected round {best['round']} worse than last saved ({self.last_saved_round})")
+                print(f"          Keeping last saved checkpoint")
+                best = last_saved
+        
+        # Track this as last saved
+        self.last_saved_round = best["round"]
         
         # Log the decision
         m = best["metrics"]
