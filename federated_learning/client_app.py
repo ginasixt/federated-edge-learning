@@ -256,7 +256,7 @@ class FlowerClient(NumPyClient):
         print(f"   Train:      {len(client_train_idx)} samples (client-local)")
         print(f"   Validation: {len(client_val_idx)} samples (client-local)")
         
-        # 3. Lade Daten + Class-Weights (global berechnet, nicht für echtes FEL scenario :( )
+        # 3. Lade Daten + Class-Weights (global berechnet, nicht für echtes FEL scenario :( ), hab ich jetzt schon vorher in normalice and add weights angewand, könnte man nochmal umschrieben.
         boost_factor = float(rc.get("pos-weight-boost", 2.0))
         
         X_train, y_train, X_val, y_val, class_weights = load_client_data(
@@ -264,8 +264,6 @@ class FlowerClient(NumPyClient):
             stats_path=rc["norm-stats-json"],
             train_row_ids=client_train_idx,
             val_row_ids=client_val_idx,
-            boost_factor=boost_factor,
-            use_cache=True 
         )
         
         # 4. DataLoader erstellen

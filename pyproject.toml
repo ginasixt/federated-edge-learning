@@ -84,7 +84,7 @@ default = "local-simulation"
 
 # Local simulation federation with 32768 virtual SuperNodes
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 65536
+options.num-supernodes = 32768
 
 # ✅ KRITISCH: Minimale Resource Limits für maximale Parallelität!
 options.backend.client-resources.num-cpus = 0.1  # ✅ 100 CPUs ÷ 0.1 = 1000 Clients parallel!

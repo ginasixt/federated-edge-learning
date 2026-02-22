@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # IID Scaling: 2 → 177575 Clients (18 Datensätze)
-CLIENT_COUNTS=(65536)
+CLIENT_COUNTS=(16384)
 RUNS_PER_SPLIT=1
 
 echo "📊 IID SCALING EXPERIMENTS (18 Configurations)"
@@ -29,6 +29,10 @@ cleanup() {
     echo "🔄 Restoring original pyproject.toml..."
     cp pyproject.toml.backup pyproject.toml
     echo "✅ Original pyproject.toml restored"
+    # ✅ NEW
+    ray stop --force 2>/dev/null || true
+    rm -rf /tmp/ray/
+    echo "✅ Ray tmp cleaned"
 }
 
 # Cleanup bei Script-Ende (auch bei Fehlern oder Ctrl+C)
@@ -152,6 +156,8 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
         if [ ${exit_code} -eq 0 ]; then
             echo "   ✅ SUCCESS in ${duration}s (${rounds} rounds)"
             successful_runs=$((successful_runs + 1))
+            ray stop --force 2>/dev/null || true
+            rm -rf /tmp/ray/
             
             # Kopiere Ergebnisse
             result_pattern="result/*/multi_thr/run_${run}.json"
@@ -170,6 +176,8 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
         # Pause zwischen Runs
         if [ ${run} -lt ${RUNS_PER_SPLIT} ]; then
             echo "   ⏳ Waiting 3s..."
+            ray stop --force 2>/dev/null || true  # ✅ NEW
+            rm -rf /tmp/ray/                       # ✅ NEW
             sleep 3
         fi
     done
