@@ -148,7 +148,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
         start_time=$(date +%s)
         
         # 🎯 Führe FL-Training aus (num-supernodes bereits in TOML, Rest per --run-config)
-       flwr run . --run-config "split-path=\"${split_file}\" min-fit-clients=${min_fit} min-available-clients=${min_available} min-evaluate-clients=${min_evaluate} num-server-rounds=${rounds} run-tag=\"${run}\"" > "${log_file}" 2>&1
+        flwr run . --run-config "split-path=\"${split_file}\" min-fit-clients=${min_fit} min-available-clients=${min_available} min-evaluate-clients=${min_evaluate} num-server-rounds=${rounds} run-tag=\"${run}\"" > "${log_file}" 2>&1
         exit_code=$?
         end_time=$(date +%s)
         duration=$((end_time - start_time))
