@@ -1,11 +1,12 @@
 """federated-learning: A Flower / PyTorch app."""
 # federated_learning/client_app.py
-# Hält MLP und Training-/Eval-Funktionen.
 from __future__ import annotations
 
 import json
-from typing import List, Dict, Tuple
-import os  # ✅ NEU
+import pickle
+import base64
+from typing import List, Tuple
+import os
 
 import numpy as np
 import torch
@@ -13,25 +14,19 @@ import torch.nn as nn
 import torch.optim as optim
 from flwr.client import ClientApp, NumPyClient
 from flwr.common import Context
+from flwr.common.record import ConfigRecord
 
 from federated_learning.task import load_client_data, make_loaders_from_arrays
 
-# ✅ FAIR SHARING: 50% Server-Ressourcen (250 GB RAM, 56 CPU-Kerne)
-# ⚠️ WICHTIG: MUSS VOR Ray-Import gesetzt werden!
-os.environ.setdefault("RAY_memory_monitor_refresh_ms", "1000")  # Check alle 1s
-os.environ.setdefault("RAY_memory_usage_threshold", "0.50")  # Max 50% Server-RAM (250 GB)
-os.environ.setdefault("RAY_object_spilling_threshold", "0.92")  # Erst bei 92% spillen (230 GB)
-
-# CPU-Limit: 56 von 112 Kernen
+os.environ.setdefault("RAY_memory_monitor_refresh_ms", "1000")
+os.environ.setdefault("RAY_memory_usage_threshold", "0.50")
+os.environ.setdefault("RAY_object_spilling_threshold", "0.92")
 os.environ.setdefault("RAY_CPU_LIMIT", "84")
-
-# ✅ Dedup Logs (verhindert Log-Spam bei 56 parallelen Clients)
 os.environ.setdefault("RAY_DEDUP_LOGS", "1")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# define a simple MLP model for Classification
 class MLP(nn.Module):
     def __init__(self, in_dim: int, hidden_dims: List[int] = [256, 128], out_dim: int = 2):
         super().__init__()
@@ -51,11 +46,11 @@ class MLP(nn.Module):
                    nn.init.constant_(m.bias, 0)
         
         # Letzte Schicht: noch kleinere Gewichte (für FEL dann)
-        # final_layer = list(self.net.children())[-1]
-        # if isinstance(final_layer, nn.Linear):
-        #     nn.init.normal_(final_layer.weight, mean=0.0, std=0.01)  # sehr kleine Gewichte
-        #     if final_layer.bias is not None:
-        #         nn.init.constant_(final_layer.bias, 0)
+        final_layer = list(self.net.children())[-1]
+        if isinstance(final_layer, nn.Linear):
+            nn.init.normal_(final_layer.weight, mean=0.0, std=0.01)  # sehr kleine Gewichte
+            if final_layer.bias is not None:
+                nn.init.constant_(final_layer.bias, 0)
 
 
 
@@ -77,32 +72,35 @@ class FocalLoss(nn.Module):
         return focal.mean()
 
 
+# --- Serialization helpers for control variates ---
+def _serialize_ndarrays(arrays: list[np.ndarray]) -> str:
+    """Serialize list of numpy arrays to base64-encoded pickle string."""
+    return base64.b64encode(pickle.dumps(arrays, protocol=4)).decode("ascii")
+
+
+def _deserialize_ndarrays(s: str) -> list[np.ndarray]:
+    """Deserialize base64-encoded pickle string back to list of numpy arrays."""
+    return pickle.loads(base64.b64decode(s.encode("ascii")))
+
+
 # --- Training/Eval-Utilities ---
-def train_one_epoch(model: nn.Module, loader, opt, crit, prox_mu: float, global_params: List[torch.Tensor], clip_norm: float):
+def train_one_epoch(model: nn.Module, loader, opt, crit, clip_norm: float):
+    """Train one epoch - FedProx removed, SCAFFOLD correction handled in FlowerClient.fit"""
     model.train()
     for xb, yb in loader:
         xb, yb = xb.to(DEVICE), yb.to(DEVICE)
         opt.zero_grad()
         logits = model(xb)
-        ce = crit(logits, yb)
-
-        prox = 0.0
-        if prox_mu > 0.0:
-            # FedProx: (mu/2) * ||w - w_global||^2
-            prox_term = 0.0
-            for w, w0 in zip(model.parameters(), global_params):
-                prox_term = prox_term + torch.sum((w - w0) ** 2)
-            prox = 0.5 * prox_mu * prox_term
-
-        loss = ce + prox
+        loss = crit(logits, yb)
         loss.backward()
         if clip_norm and clip_norm > 0:
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_norm)
         opt.step()
 
+
 def evaluate_multi_threshold(
-    model: nn.Module, 
-    loader, 
+    model: nn.Module,
+    loader,
     crit,
     threshold_grid: List[float]
 ) -> Tuple[float, int, dict]:
@@ -174,9 +172,6 @@ def evaluate_multi_threshold(
     return avg_loss, n_samples, metrics
 
 
-    
-
-
 def evaluate(model: nn.Module, loader, crit, threshold: float) -> Tuple[float, int, dict]:
     model.eval()
     total_loss = 0.0
@@ -223,14 +218,11 @@ def evaluate(model: nn.Module, loader, crit, threshold: float) -> Tuple[float, i
     return avg_loss, n_samples, metrics
 
 
-# --- Flower-Client ---
 class FlowerClient(NumPyClient):
-    def __init__(self, cid: str, rc: dict):
-        super().__init__()
-        # Client-ID, Run-Config von client_fn
-        self.cid = str(cid)
-        self.rc = rc
-        
+    def __init__(self, cid: str, rc: dict, context: Context):  # accept context
+        self.cid = cid
+        self.context = context  # store for state access
+
         # 1. Split-Mapping laden
         split_path = rc.get("split-path")
         if not split_path:
@@ -257,7 +249,7 @@ class FlowerClient(NumPyClient):
         print(f"   Validation: {len(client_val_idx)} samples (client-local)")
         
         # 3. Lade Daten + Class-Weights (global berechnet, nicht für echtes FEL scenario :( ), hab ich jetzt schon vorher in normalice and add weights angewand, könnte man nochmal umschrieben.
-        boost_factor = float(rc.get("pos-weight-boost", 2.0))
+        # boost_factor = float(1.3)
         
         X_train, y_train, X_val, y_val, class_weights = load_client_data(
             parquet_path=rc["prepared-parquet"],
@@ -268,6 +260,15 @@ class FlowerClient(NumPyClient):
         
         # 4. DataLoader erstellen
         bs = int(rc.get("batch-size", 128))
+
+        # # 4. DataLoader erstellen – batch_size ≈ 20% of local training data
+        # bs_cfg = rc.get("batch-size", None)
+        # if bs_cfg is not None:
+        #     bs = int(bs_cfg)
+        # else:
+        #     bs = max(1, int(len(X_train) * 0.2))  # ~20% of local data per batch
+        #     print(f"[Client {self.cid}] Dynamic batch size: {bs} (~20% of {len(X_train)} train samples)")
+
         self.train_loader, self.val_loader = make_loaders_from_arrays(
             X_train, y_train, X_val, y_val, batch_size=bs
         )
@@ -276,88 +277,134 @@ class FlowerClient(NumPyClient):
         self.model = MLP(in_dim=X_train.shape[1]).to(DEVICE)
         
         # 6. Loss mit Class-Weights (bereits auf CPU, muss nur zu GPU)
+        # norm_stats wurde mit boost=2.0 vorberechnet → zur Laufzeit rescalen
+        # PRECOMPUTED_BOOST = 2.0
+        # class_weights[1] = class_weights[1] * (boost_factor / PRECOMPUTED_BOOST)
         class_weights = class_weights.to(DEVICE)
         
-        use_focal = rc.get("use-focal-loss", False)
-        if use_focal:
-            gamma = float(rc.get("focal-gamma", 2.0))
-            self.crit = FocalLoss(alpha=class_weights, gamma=gamma)
-        else:
-            self.crit = nn.CrossEntropyLoss(weight=class_weights)
+        self.crit = nn.CrossEntropyLoss(weight=class_weights)
 
         # 7. Defaults
         self.default_lr = float(rc.get("lr", 1e-2))
-        
-        # Anzahl der lokalen Epochen aus config, (default 1)
-        # the config arument is send from the server (run-config) to the client
-        # the server can set the number of epochs, learning rate, etc. (look at server_app.py)
-        # in the next step we then train our local model.
-        self.local_epochs = int(rc.get("local-epochs", 1))
+        self.local_epochs = int(rc.get("local-epochs", 2))
         self.eval_threshold = float(rc.get("eval-threshold", 0.35))
 
+        # ── SCAFFOLD state: c_i initialised to zeros ──────────────────────
+        # Will be lazily initialized to correct shape on first fit() call
+        self.ci: list[torch.Tensor] | None = None
 
-     # FOR EVERY ROUND THE FOLLOWING METHODS ARE CALLED:
-     # 1) fit is called to train the model locally for each client
-         # 1) the current weights are set
-         # 2) the model is trained on the local data for a number of epochs
-         # 3) the new weights are returned to the server
+    # FOR EVERY ROUND THE FOLLOWING METHODS ARE CALLED:
     def fit(self, parameters, config):
-        # Sets the model weights and trains the model on the local data
+        """Train locally with SCAFFOLD gradient correction."""
+        # 1) Set current global weights & snapshot x (global model before update)
         self.set_parameters(parameters)
-        global_params = [p.clone().to(DEVICE) for p in self.model.parameters()]
+        x_global = [p.detach().clone().cpu() for p in self.model.parameters()]
 
-        lr = float(config.get("lr", self.default_lr))
+        lr    = float(config.get("lr", self.default_lr))
         epochs = int(config.get("epochs", self.local_epochs))
-        mu = float(config.get("mu", 1e-3))
-        wd = float(config.get("weight-decay", 1e-4))
-        clip = float(config.get("clip-grad-norm", 5.0))
+        wd    = float(config.get("weight-decay", 0))
+        clip  = float(config.get("clip-grad-norm", 5.0))
 
-        opt = optim.SGD(self.model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
+        # 2) Receive server control variate c from config (JSON-serialized)
+        if "scaffold_c" in config:
+            c_arrays = _deserialize_ndarrays(config["scaffold_c"])
+            c_list = [
+                torch.tensor(a, device=DEVICE, dtype=torch.float32)
+                for a in c_arrays
+            ]
+        else:
+            # Round 1 fallback: server hasn't sent c yet → treat as zeros
+            c_list = [
+                torch.zeros_like(p, device=DEVICE)
+                for p in self.model.parameters()
+            ]
 
-        # Training
-        fit_total = 0
+        # 3) Load ci from persistent state (replaces self.ci check)
+        self.ci = self._load_ci()
+        if self.ci is None:
+            print(f"[Client {self.cid}] ⚠️  ci initialized to zeros (first round)")
+            self.ci = [torch.zeros_like(p, device=DEVICE) for p in self.model.parameters()]
+        else:
+            print(f"[Client {self.cid}] ✅ ci loaded from persistent state")
+
+        # SCAFFOLD uses vanilla SGD (no momentum) so the math stays exact
+        # (momentum would shift the effective gradient and break the variance-reduction proof)
+        opt = optim.SGD(self.model.parameters(), lr=lr, weight_decay=0)
+
+        # Count total local steps K = epochs × batches (used for c_i update)
+        num_batches = len(self.train_loader)
+        K = max(1, epochs * num_batches)
+
+        # ── SCAFFOLD Option II c_i update ──────────────────────────────────
+        # c_i_new = c_i - c + (x - y) / (K * lr)
+        # With full-batch (K=1) and small lr, the correction explodes.
+        # Clamp the correction term to avoid divergence.
+        MAX_CI_NORM = 1.0  # tune if needed
+
+        fit_total   = 0
         fit_correct = 0
-        fit_ce_sum = 0.0
+        fit_ce_sum  = 0.0
 
         self.model.train()
         for _ in range(epochs):
             for xb, yb in self.train_loader:
                 xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+
                 opt.zero_grad()
                 logits = self.model(xb)
                 ce = self.crit(logits, yb)
+                ce.backward()
 
-                # FedProx-Term
-                prox = 0.0
-                if mu > 0.0:
-                    prox_term = 0.0
-                    for w, w0 in zip(self.model.parameters(), global_params):
-                        prox_term = prox_term + torch.sum((w - w0) ** 2)
-                    prox = 0.5 * mu * prox_term
-
-                loss = ce + prox
-                loss.backward()
+                # Clip BEFORE SCAFFOLD correction
                 if clip and clip > 0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=clip)
+
+                # SCAFFOLD correction applied after clipping
+                with torch.no_grad():
+                    for p, ci_t, c_t in zip(self.model.parameters(), self.ci, c_list):
+                        if p.grad is not None:
+                            p.grad.add_(c_t - ci_t)
+
                 opt.step()
 
                 bs = xb.size(0)
-                fit_total += bs
+                fit_total   += bs
                 fit_correct += (logits.argmax(1) == yb).sum().item()
-                fit_ce_sum += ce.item() * bs  # nur CE loggen
+                fit_ce_sum  += ce.item() * bs
+
+        # 4) Control variate update (SCAFFOLD Option II):
+        #    c_i_new = c_i - c + (1 / K*lr) * (x - y_i)
+        #    delta_ci = c_i_new - c_i  →  sent to server for aggregation
+        y_local = [p.detach().clone().cpu() for p in self.model.parameters()]
+
+        delta_ci: list[np.ndarray] = []
+        new_ci:   list[torch.Tensor] = []
+
+        with torch.no_grad():
+            for ci_t, c_t, x_t, y_t in zip(self.ci, c_list, x_global, y_local):
+                # c_i_new = c_i - c + (x - y) / (K * lr)
+                correction = (x_t - y_t) / (K * lr)
+                # Clamp correction norm per tensor
+                norm = correction.norm()
+                if norm > MAX_CI_NORM:
+                    correction = correction * (MAX_CI_NORM / norm)
+                ci_new = ci_t.cpu() - c_t.cpu() + correction
+                new_ci.append(ci_new.to(DEVICE))
+                delta_ci.append((ci_new - ci_t.cpu()).numpy())
+
+        # Persist updated c_i for next round
+        self.ci = new_ci
+        self._save_ci(new_ci)  # ← ADD THIS LINE
 
         fit_metrics = {
-            "fit_loss": fit_ce_sum / max(1, fit_total),
+            "fit_loss":     fit_ce_sum / max(1, fit_total),
             "fit_accuracy": fit_correct / max(1, fit_total),
+            # Send Δc_i to server so it can update the global control variate c
+            "scaffold_delta_ci": _serialize_ndarrays(delta_ci),
         }
+
         return self.get_parameters({}), len(self.train_loader.dataset), fit_metrics
 
-  
-    # 2) this method is called to evaluate the local clients model
-        # 1) the new global weights are set and and 
-        #    the optimal threshold is found on the local validation data
-        # 2) the model is evaluated on the local test data
-        # 3) Loss and accurany are returned
     def evaluate(self, parameters, config):
         """Evaluate nur wenn config nicht leer"""
     
@@ -371,7 +418,7 @@ class FlowerClient(NumPyClient):
         # 2) Get threshold grid
         threshold_grid_str = config.get(
             "threshold_grid", 
-            json.dumps([0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55])
+            json.dumps([0.20, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7])  # default grid if not provided
         )
         threshold_grid = json.loads(threshold_grid_str)
         
@@ -398,27 +445,42 @@ class FlowerClient(NumPyClient):
     
         return float(loss), int(n_val), metrics
     
+    # ── SCAFFOLD persistence helpers (uses Flower context.state) ────────────
+    _CI_STATE_KEY = "scaffold_ci"
+
+    def _save_ci(self, ci: list[torch.Tensor]) -> None:
+        """Persist c_i into Flower's built-in per-client state (no disk I/O)."""
+        arrays = [t.detach().cpu().numpy().astype(np.float32) for t in ci]
+        serialized = _serialize_ndarrays(arrays)  # pickle+base64, shape-safe
+        record = ConfigRecord({self._CI_STATE_KEY: serialized})
+        self.context.state.config_records[self._CI_STATE_KEY] = record
+
+    def _load_ci(self) -> list[torch.Tensor] | None:
+        """Load c_i from Flower's per-client state. Returns None on first round."""
+        if self._CI_STATE_KEY not in self.context.state.config_records:
+            return None
+        record = self.context.state.config_records[self._CI_STATE_KEY]
+        serialized = record[self._CI_STATE_KEY]
+        arrays = _deserialize_ndarrays(serialized)  # restores exact shapes
+        return [
+            torch.tensor(a, device=DEVICE, dtype=torch.float32)
+            for a in arrays
+        ]
+
     def set_parameters(self, parameters):
-        keys = list(self.model.state_dict().keys())
+        keys  = list(self.model.state_dict().keys())
         state = {k: torch.tensor(v) for k, v in zip(keys, parameters)}
         self.model.load_state_dict(state, strict=True)
 
-    # 1.2) After the training is complete, we return the current model weights to the server
     def get_parameters(self, config):
         return [v.detach().cpu().numpy() for _, v in self.model.state_dict().items()]
 
 
 def client_fn(context: Context):
-    # run_config als dict holen
-    rc = dict(context.run_config)
-    cid = None
-    if hasattr(context, "node_config"):
-        # cid(partition-id) wird aus der run_config gholt
-        cid = context.node_config.get("partition-id")
-    if cid is None:
-        raise RuntimeError("No client id (cid) found in context.node_config or run_config.")
-    # erzeugen von FlowerClient mit Client-ID und Run-Config
-    return FlowerClient(str(cid), rc).to_client()
+    cid = context.node_config.get("partition-id", context.node_id)
+    rc  = dict(context.run_config)
+    return FlowerClient(str(cid), rc, context).to_client()  # pass context
+
 
 app = ClientApp(client_fn=client_fn)
 
@@ -435,141 +497,3 @@ app = ClientApp(client_fn=client_fn)
 
 
 
-
-
-# UNUSED METHODs FOR THE CASE OF THE CASE:
-
-# def find_optimal_threshold(model: nn.Module, loader, min_recall=0.75, min_spec=0.70):
-#     """
-#     Client findet optimalen Threshold lokal basierend auf:
-#     - Min. Recall (Safety: muss mind. 75% der Fälle finden)
-#     - Beste Specificity (bei gegebenem Recall)
-#     """
-#     model.eval()
-#     probs_all = []
-#     y_all = []
-    
-#     # Sammle alle Wahrscheinlichkeiten (lokal, werden NICHT gesendet!)
-#     with torch.no_grad():
-#         for xb, yb in loader:
-#             xb, yb = xb.to(DEVICE), yb.to(DEVICE)
-#             logits = model(xb)
-#             probs = torch.softmax(logits, dim=1)[:, 1]
-#             probs_all.append(probs.cpu())
-#             y_all.append(yb.cpu())
-    
-#     probs = torch.cat(probs_all).numpy()
-#     y = torch.cat(y_all).numpy()
-    
-#     # Berechne ROC-Kurve (lokal!)
-#     from sklearn.metrics import roc_curve
-#     fpr, tpr, thresholds = roc_curve(y, probs)
-    
-#     # Finde Thresholds, die min_recall erfüllen
-#     valid_indices = np.where(tpr >= min_recall)[0]
-    
-#     if len(valid_indices) == 0:
-#         # Fallback: Bester verfügbarer Recall
-#         optimal_idx = np.argmax(tpr)
-#     else:
-#         # Unter gültigen: maximiere Specificity (= minimiere FPR)
-#         valid_fprs = fpr[valid_indices]
-#         best_among_valid = valid_indices[np.argmin(valid_fprs)]
-#         optimal_idx = best_among_valid
-    
-#     optimal_threshold = float(thresholds[optimal_idx])
-#     optimal_recall = float(tpr[optimal_idx])
-#     optimal_spec = float(1.0 - fpr[optimal_idx])
-    
-#     # Berechne auch Youden's Index zum Vergleich
-#     youden_index = tpr - fpr
-#     youden_optimal_idx = np.argmax(youden_index)
-#     youden_threshold = float(thresholds[youden_optimal_idx])
-    
-#     return {
-#         "optimal_threshold": optimal_threshold,
-#         "optimal_recall": optimal_recall,
-#         "optimal_spec": optimal_spec,
-#         "youden_threshold": youden_threshold,  # Alternative Metrik
-#         "num_samples": len(y),
-#     }
-
-
-# def find_optimal_threshold_adaptive(
-#     model: nn.Module, 
-#     loader, 
-#     min_recall=0.72, 
-#     min_spec=0.70,
-#     fallback_min_recall=0.65,  #Relaxed fallback
-#     fallback_min_spec=0.60):
-#     """
-#     Adaptive threshold search with graceful degradation:
-#     1) Try to find threshold with (min_recall, min_spec)
-#     2) If fails, try relaxed constraints (fallback_min_recall, fallback_min_spec)
-#     3) If still fails, use Youden's Index (best balance)
-#     """
-#     model.eval()
-#     probs_all = []
-#     y_all = []
-    
-#     with torch.no_grad():
-#         for xb, yb in loader:
-#             xb, yb = xb.to(DEVICE), yb.to(DEVICE)
-#             logits = model(xb)
-#             probs = torch.softmax(logits, dim=1)[:, 1]
-#             probs_all.append(probs.cpu())
-#             y_all.append(yb.cpu())
-    
-#     probs = torch.cat(probs_all).numpy()
-#     y = torch.cat(y_all).numpy()
-    
-#     from sklearn.metrics import roc_curve
-#     fpr, tpr, thresholds = roc_curve(y, probs)
-    
-#     # Schritt 1: Versuche primäre Constraints (strikt)
-#     valid_indices = np.where((tpr >= min_recall) & ((1 - fpr) >= min_spec))[0]
-    
-#     if len(valid_indices) > 0:
-#         # Erfolg: Wähle besten unter gültigen (minimiere FPR)
-#         best_idx = valid_indices[np.argmin(fpr[valid_indices])]
-#         strategy = "primary"
-#     else:
-#         # Schritt 2: Fallback zu relaxed Constraints
-#         print(f"⚠️  Client: No threshold meets primary constraints (recall≥{min_recall}, spec≥{min_spec})")
-#         print(f"   Trying relaxed constraints (recall≥{fallback_min_recall}, spec≥{fallback_min_spec})")
-        
-#         valid_indices = np.where((tpr >= fallback_min_recall) & ((1 - fpr) >= fallback_min_spec))[0]
-        
-#         if len(valid_indices) > 0:
-#             best_idx = valid_indices[np.argmin(fpr[valid_indices])]
-#             strategy = "fallback"
-#         else:
-#             # Schritt 3: Ultimate Fallback - Youden's Index
-#             print(f"⚠️  Client: Relaxed constraints also failed")
-#             print(f"   Using Youden's Index (best balance between recall & spec)")
-            
-#             youden_index = tpr - fpr
-#             best_idx = np.argmax(youden_index)
-#             strategy = "youden"
-    
-#     optimal_threshold = float(thresholds[best_idx])
-#     optimal_recall = float(tpr[best_idx])
-#     optimal_spec = float(1.0 - fpr[best_idx])
-    
-#     # ✅ Zusätzlich: Youden's Threshold als Referenz
-#     youden_index = tpr - fpr
-#     youden_idx = np.argmax(youden_index)
-#     youden_threshold = float(thresholds[youden_idx])
-    
-#     # ✅ Quality Score: Wie gut ist dieser Threshold?
-#     quality_score = 0.6 * optimal_recall + 0.4 * optimal_spec  # Gewichtet für Screening
-    
-#     return {
-#         "optimal_threshold": optimal_threshold,
-#         "optimal_recall": optimal_recall,
-#         "optimal_spec": optimal_spec,
-#         "youden_threshold": youden_threshold,
-#         "num_samples": len(y),
-#         "strategy": strategy,  # "primary", "fallback", or "youden"
-#         "quality_score": quality_score,  # 0-1, higher = better
-#     }

@@ -54,7 +54,9 @@ def load_client_data(
     X_val = X_all[val_indices]
     y_val = y_all[val_indices]
     
-    # 6. ✅ Class-Weights aus norm_stats.json (vorberechnet, weight bosst für pos schon drin x2)
+    # 6. ✅ Class-Weights aus norm_stats.json (vorberechnet, weight bosst für pos schon drin 1,5)
+    # // 0.86066732366 pos_weight ohne boost
+    # 2.0 weigt boost: 1.7213346473321132
     class_weights = torch.tensor(
         [meta["neg_weight"], meta["pos_weight"]], 
         dtype=torch.float32

@@ -2,49 +2,80 @@
 from __future__ import annotations
 
 import torch
-from pathlib import Path
-from flwr.server import ServerApp, ServerConfig
-from flwr.server.strategy import FedAvg
-from flwr.common import Context, Parameters, FitRes, ndarrays_to_parameters, parameters_to_ndarrays
-from flwr.common.record import ConfigRecord
-from federated_learning.client_app import MLP
 import json
 import numpy as np
+from pathlib import Path
+
+from flwr.server import ServerApp, ServerConfig
+from flwr.server.strategy import FedAvg
+from flwr.common import (
+    Context, Parameters, FitRes,
+    ndarrays_to_parameters, parameters_to_ndarrays,
+)
+from flwr.common.record import ConfigRecord
 
 try:
     from flwr.server.app import ServerAppComponents
 except ImportError:
     from flwr.server import ServerAppComponents
 
+from federated_learning.client_app import MLP, _serialize_ndarrays, _deserialize_ndarrays
 
-class FedAvgWithScreening(FedAvg):
+
+class ScaffoldFedAvg(FedAvg):
     """
-    Custom FedAvg Strategy that:
-    1. Caches parameters in RAM after aggregation
-    2. Tracks metrics with ScreeningPolicy
-    3. Saves checkpoints for best rounds
+    FedAvg extended with SCAFFOLD control-variate aggregation.
+
+    Extra responsibilities vs. plain FedAvg:
+      - Maintains a server-side global control variate  c  (one tensor per parameter).
+      - Injects  c  into every fit-config so clients can correct their gradients.
+      - After each fit round aggregates the  Δc_i  reports from clients and
+        updates  c  ←  c + (1/N) * Σ Δc_i   (N = total number of supernodes).
+      - Caches aggregated parameters in RAM and writes checkpoints + JSON metrics
+        after each evaluation round (unchanged from the original FedAvgWithScreening).
     """
-    
+
     def __init__(
         self,
         checkpoint_dir: Path,
-        model_dim: int,  # Feature-Dimension für MLP
+        model_dim: int,
         run_config: dict,
+        num_total_clients: int,       # N in the SCAFFOLD paper
         *args,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.checkpoint_dir = checkpoint_dir
-        self.model_dim = model_dim
-        self.run_config = run_config
+        self.model_dim      = model_dim
+        self.run_config     = run_config
+        self.num_total_clients = max(1, num_total_clients)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Template für State Dict Keys
+
+        # Template model – used for state-dict key mapping & parameter shapes
         self.template_model = MLP(in_dim=model_dim)
-        
-        # RAM-Cache: {server_round: Parameters}
+
+        # Global control variate c – one zero-vector per parameter tensor.
+        # Initialised lazily on the first aggregate_fit call so we know shapes.
+        self.c_global: list[np.ndarray] | None = None
+
+        # RAM cache: {server_round: Parameters}
         self.parameters_cache: dict[int, Parameters] = {}
-    
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _init_c_global(self) -> list[np.ndarray]:
+        """Return a list of zero arrays matching the model's parameter shapes."""
+        return [
+            np.zeros_like(v.detach().cpu().numpy())
+            for v in self.template_model.parameters()
+        ]
+
+    # ------------------------------------------------------------------
+    # aggregate_fit  – FedAvg aggregation  +  SCAFFOLD c update
+    # ------------------------------------------------------------------
+
     def aggregate_fit(
         self,
         server_round: int,
@@ -52,195 +83,194 @@ class FedAvgWithScreening(FedAvg):
         failures: list[tuple[any, FitRes] | BaseException],
     ) -> tuple[Parameters | None, dict[str, any]]:
         """Aggregiere Gewichte und speichere im RAM."""
-        
-        # 1) Standard FedAvg Aggregation
+
+        # 1) Standard FedAvg weight aggregation 
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(
             server_round, results, failures
         )
-        
         if aggregated_parameters is None:
             return None, {}
-        
-        # 2) Speichere im RAM
+
+        # ── 1b) Apply global step size η_g = 1 (SCAFFOLD paper default) ───
+        # FedAvg already computes weighted average of client updates.
+        # η_g = 1 means we use the aggregated parameters as-is (no server damping).
+        # If you ever want η_g < 1, scale the delta from the previous round here.
+        # (Currently a no-op since η_g = 1, but explicit for clarity)
+        # global_lr = 1.0  → no scaling needed
+
+        # ── 2) Cache aggregated parameters for checkpoint saving ───────────
         self.parameters_cache[server_round] = aggregated_parameters
-        
-        # 3) Cleanup: Behalte nur die letzten 3 Runden im RAM
         if len(self.parameters_cache) > 3:
-            oldest = min(self.parameters_cache.keys())
-            del self.parameters_cache[oldest]
-        
+            del self.parameters_cache[min(self.parameters_cache)]
+
+        # ── 3) Lazy-init global control variate ───────────────────────────
+        if self.c_global is None:
+            self.c_global = self._init_c_global()
+
+        # ── 4) Aggregate Δc_i from clients and update c ───────────────────
+        #   c ← c + (1/N) * Σ Δc_i
+        #   N = total number of supernodes (not just sampled ones!)
+        delta_sum: list[np.ndarray] | None = None
+        num_contributors = 0
+
+        for _client_proxy, fit_res in results:
+            raw = fit_res.metrics.get("scaffold_delta_ci", None)
+            if raw is None:
+                continue
+            try:
+                delta_ci = _deserialize_ndarrays(raw)
+            except Exception as e:
+                print(f"⚠️  Could not deserialize scaffold_delta_ci: {e}")
+                continue
+
+            if delta_sum is None:
+                delta_sum = [np.zeros_like(d) for d in delta_ci]
+
+            for idx, d in enumerate(delta_ci):
+                delta_sum[idx] = delta_sum[idx] + d
+
+            num_contributors += 1
+
+        if delta_sum is not None and num_contributors > 0:
+            scale = 1.0 / self.num_total_clients   # divide by N, not by sampled count
+            for idx in range(len(self.c_global)):
+                self.c_global[idx] = self.c_global[idx] + scale * delta_sum[idx]
+
+            print(
+                f"🔧 Round {server_round}: Updated c_global from "
+                f"{num_contributors} client Δc_i reports (N={self.num_total_clients})"
+            )
+        else:
+            print(f"⚠️  Round {server_round}: No scaffold_delta_ci received – c_global unchanged")
+
         return aggregated_parameters, aggregated_metrics
-    
+
+    # ------------------------------------------------------------------
+    # aggregate_evaluate  – unchanged checkpoint / JSON logic
+    # ------------------------------------------------------------------
+
     def aggregate_evaluate(
         self,
         server_round: int,
         results: list[tuple[any, any]],
         failures: list[tuple[any, any] | BaseException],
     ) -> tuple[float | None, dict[str, any]]:
-        """Nach Evaluation: Prüfe ob beste Runde und speichere Checkpoint."""
-        
-        # ✅ 1) Early Exit: Keine Results 
+        """Save checkpoint + JSON metrics for every evaluated round."""
+
         if not results:
             return None, {}
-        
-        # ✅ 2) Filtering: Nur Clients mit n_val > 0 
-        valid_results = []
-        for client_proxy, evaluate_res in results:
-            if evaluate_res.num_examples > 0:
-                valid_results.append((client_proxy, evaluate_res))
-        
-        # ✅ 3) Check: Alle n_val=0?
+
+        valid_results = [
+            (cp, res) for cp, res in results if res.num_examples > 0
+        ]
         if not valid_results:
             print(f"⏭️  Round {server_round}: Evaluation skipped (all n_val=0)")
             return None, {}
-        
-        # ✅ 4) Standard Aggregation 
+
         loss, metrics = super().aggregate_evaluate(server_round, valid_results, failures)
-        
         if not metrics:
             return loss, {}
-        
-        # ✅ 5) Speichere JEDE evaluierte Runde (für Post-Training Screening)
+
         if server_round in self.parameters_cache:
-            # Speichere Checkpoint
             checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}.pt"
             self._save_checkpoint(server_round, self.parameters_cache[server_round], checkpoint_path)
-            
-            # Speichere Metriken als JSON
-            run_tag = str(self.run_config.get("run-tag", "1"))
+
+            run_tag   = str(self.run_config.get("run-tag", "1"))
             json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
-            
-            metrics_with_meta = {
-                "round": server_round,
-                "metrics": metrics,
-                "model_checkpoint": str(checkpoint_path)
-            }
-            
+
             with open(json_path, "w") as f:
-                json.dump(metrics_with_meta, f, indent=2)
-            
+                json.dump(
+                    {"round": server_round, "metrics": metrics,
+                     "model_checkpoint": str(checkpoint_path)},
+                    f, indent=2,
+                )
             print(f"💾 Round {server_round}: Saved {checkpoint_path.name} + {json_path.name}")
-        
+
         return loss, metrics
-    
-    def _save_checkpoint(
-        self, 
-        server_round: int, 
-        parameters: Parameters,
-        checkpoint_path: Path
-    ):
-        """Speichert Flower Parameters als PyTorch State Dict.
-        
-        Args:
-            server_round: Aktuelle Runde
-            parameters: Flower Parameters-Objekt
-            checkpoint_path: Wo speichern
-        """
-        # 1) Konvertiere Flower Parameters zu NumPy Arrays
-        ndarrays = parameters_to_ndarrays(parameters)
-        
-        # 2) Mappe zu PyTorch State Dict
+
+    # ------------------------------------------------------------------
+    # _save_checkpoint  – unchanged
+    # ------------------------------------------------------------------
+
+    def _save_checkpoint(self, server_round: int, parameters: Parameters, checkpoint_path: Path):
+        ndarrays        = parameters_to_ndarrays(parameters)
         state_dict_keys = list(self.template_model.state_dict().keys())
-        
+
         if len(ndarrays) != len(state_dict_keys):
             print(f"⚠️  Parameter count mismatch! "
                   f"Expected {len(state_dict_keys)}, got {len(ndarrays)}")
             return
-        
+
         state_dict = {
-            key: torch.tensor(arr, dtype=torch.float32)
-            for key, arr in zip(state_dict_keys, ndarrays)
+            k: torch.tensor(arr, dtype=torch.float32)
+            for k, arr in zip(state_dict_keys, ndarrays)
         }
-        
-        # Speichere auf Disk
         torch.save(state_dict, checkpoint_path)
         print(f"   💾 Checkpoint saved: {checkpoint_path}")
 
 
-# flwr run lädt über pyproject.toml serverapp = "…server_app:app".
-# Flower ruft server_fn(context) auf.
-#  context.run_config (die TOML-Werte) werden gelesen
-# bauen FedAvg(..., on_fit_config_fn=..., evaluate_metrics_aggregation_fn=...).
-# udn geben ServerAppComponents(config, strategy) zurück.
-# Ab dann orchestriert Flower die Runden (Sampling, Fit, Evaluate).
+# -----------------------------------------------------------------------
+# server_fn
+# -----------------------------------------------------------------------
+
 def server_fn(context: Context) -> ServerAppComponents:
-    """Build strategy + config. FedAvg + multi-threshold optimization + checkpointing"""
+    """Build ScaffoldFedAvg strategy + server config."""
     rc = dict(context.run_config)
-    
-    # Checkpoint-Verzeichnis (alle Runden für Post-Training Screening)
-    checkpoint_dir = Path(f"result/{rc.get('split-path','default')}/all_rounds/")
-    
-    # Model-Dimension (aus prepared data)
-    model_dim = 21  # Deine Feature-Anzahl (kannst du auch dynamisch laden)
 
-    total_rounds = int(rc.get("num-server-rounds", 80))
+    checkpoint_dir     = Path(f"result/{rc.get('split-path', 'default')}/all_rounds/")
+    model_dim          = 21
+    total_rounds       = int(rc.get("num-server-rounds", 80))
+    num_total_clients  = int(rc.get("min-available-clients", 32768))
 
-    # Threshold-Grid
-    threshold_grid = [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
-    
-    
+    # Holds a reference to the strategy so on_fit_config_fn can read c_global.
+    # We use a one-element list as a mutable closure cell.
+    strategy_ref: list[ScaffoldFedAvg] = []
+
     def on_fit_config_fn(rnd: int) -> dict:
-        """Config für Training"""
-        lr = float(rc.get("lr", 1e-2)) if rnd < 3 else float(rc.get("lr-after", 5e-3))
-        
-        return {
-            "epochs": int(rc.get("local-epochs", 1)),
-            "lr": lr,
-            "mu": float(rc.get("mu", 1e-3)),
-            "weight-decay": float(rc.get("weight-decay", 1e-4)),
+        """Send training hyper-params + current global control variate c to clients."""
+        lr = float(rc.get("lr", 1e-2))
+
+        cfg: dict = {
+            "epochs":         int(rc.get("local-epochs", 2)),
+            "lr":             lr,
+            "weight-decay":   float(rc.get("weight-decay", 1e-4)),
             "clip-grad-norm": float(rc.get("clip-grad-norm", 5.0)),
         }
-    
+
+        # Inject current c_global so clients can apply gradient correction
+        if strategy_ref and strategy_ref[0].c_global is not None:
+            cfg["scaffold_c"] = _serialize_ndarrays(strategy_ref[0].c_global)
+        # Round 1: c_global is still None → clients fall back to zeros automatically
+
+        return cfg
+
     def on_evaluate_config_fn(rnd: int) -> dict:
-        """
-        ADAPTIVE Evaluation Schedule:
-        - Runden 1-40: Alle 10 Runden (Warmup/Early Training)
-        - Runden 41-65: Alle 5 Runden (Mid Training)
-        - Runden 66+: JEDE Runde (Critical Convergence Phase)
-        - Runde 1 & letzte Runde: IMMER evaluieren
-        """
-        # Erste und letzte Runde IMMER evaluieren
+        # First and last round always evaluate
         if rnd == 1 or rnd == total_rounds:
-            pass  # Evaluation läuft
-        
-        # Runden 1-70: Alle 10 Runden
+            pass
         elif rnd <= 70:
             if rnd % 10 != 0:
-                return {}  # Skip Evaluation, senden leere Config, also kein threshold grid
-        
-        
-        
-        # Runden 41-70: Alle 5 Runden
-        # elif rnd <= 70:
-        #     if rnd % 5 != 0:
-        #         return {}  # Skip Evaluation
-        
-        # Runden 66+: Jede Runde (kritische Konvergenz-Phase)
-        # Kein Skip nötig
-        
-        # ✅ Threshold Grid (nur wenn Eval läuft)
-        threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
-        
-        return {
-            "threshold_grid": json.dumps(threshold_grid),
-        }
-    
+                return {}  # Skip evaluation this round
+
+        threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
+        return {"threshold_grid": json.dumps(threshold_grid)}
+
+    # ── metric helpers ─────────────────────────────────────────────────
+
     def _safe_div(a: float, b: float) -> float:
         return float(a) / float(b) if b else 0.0
-    
+
     def _metrics_from_counts(tp: int, fp: int, tn: int, fn: int) -> dict:
-        """Berechne Metriken aus TP/FP/TN/FN"""
-        tpr = _safe_div(tp, tp + fn)
-        fpr = _safe_div(fp, fp + tn)
-        spec = 1.0 - fpr
-        ppv = _safe_div(tp, tp + fp)
-        npv = _safe_div(tn, tn + fn)
-        f1 = _safe_div(2*ppv*tpr, ppv + tpr) if (ppv + tpr) else 0.0
+        tpr     = _safe_div(tp, tp + fn)
+        fpr     = _safe_div(fp, fp + tn)
+        spec    = 1.0 - fpr
+        ppv     = _safe_div(tp, tp + fp)
+        npv     = _safe_div(tn, tn + fn)
+        f1      = _safe_div(2 * ppv * tpr, ppv + tpr)
         bal_acc = 0.5 * (tpr + spec)
-        youden = tpr + spec - 1.0
-        prev = _safe_div(tp + fn, tp + fp + tn + fn)
+        youden  = tpr + spec - 1.0
+        prev    = _safe_div(tp + fn, tp + fp + tn + fn)
         alerts_per_1000 = _safe_div(tp + fp, tp + fp + tn + fn) * 1000.0
-        
         return {
             "tp": tp, "fp": fp, "tn": tn, "fn": fn,
             "tpr": tpr, "recall": tpr,
@@ -249,7 +279,7 @@ def server_fn(context: Context) -> ServerAppComponents:
             "f1": f1, "balanced_accuracy": bal_acc, "youden": youden,
             "prevalence": prev, "alerts_per_1000": alerts_per_1000,
         }
-    
+
     def evaluate_metrics_aggregation_fn(eval_metrics: list[tuple[int, dict]]) -> dict:
         """
         Aggregate evaluation metrics from clients using multi-threshold optimization.
@@ -355,38 +385,44 @@ def server_fn(context: Context) -> ServerAppComponents:
         }
     
     def fit_metrics_aggregation_fn(metrics):
-        """Aggregiere Fit-Metriken."""
+        """Weighted average of scalar fit metrics (excludes scaffold_delta_ci)."""
         n_sum = sum(n for n, _ in metrics) or 1
-        keys = set().union(*(m.keys() for _, m in metrics))
-        return {k: sum(n * m.get(k, 0.0) for n, m in metrics) / n_sum for k in keys}
-    
-    # ✅ Eine saubere Strategy-Klasse
-    strategy = FedAvgWithScreening(
+        # Only aggregate numeric scalars; skip the serialized control-variate string
+        scalar_keys = set()
+        for _, m in metrics:
+            for k, v in m.items():
+                if isinstance(v, (int, float)) and k != "scaffold_delta_ci":
+                    scalar_keys.add(k)
+        return {
+            k: sum(n * float(m.get(k, 0.0)) for n, m in metrics) / n_sum
+            for k in scalar_keys
+        }
+
+    # ── build strategy ─────────────────────────────────────────────────
+
+    strategy = ScaffoldFedAvg(
         checkpoint_dir=checkpoint_dir,
         model_dim=model_dim,
         run_config=rc,
-        # FedAvg-Parameter
+        num_total_clients=num_total_clients,
+        # FedAvg parameters
         fraction_fit=float(rc.get("fraction-fit", 0.8)),
         fraction_evaluate=float(rc.get("fraction-evaluate", 1.0)),
-        min_fit_clients=int(rc.get("min-fit-clients", 6)), # is the number of clients that are sampled to be trained in each round
-        min_available_clients=int(rc.get("min-available-clients", 8)), 
+        min_fit_clients=int(rc.get("min-fit-clients", 6)),
+        min_available_clients=int(rc.get("min-available-clients", 8)),
         min_evaluate_clients=int(rc.get("min-evaluate-clients", 8)),
         on_fit_config_fn=on_fit_config_fn,
         on_evaluate_config_fn=on_evaluate_config_fn,
         evaluate_metrics_aggregation_fn=evaluate_metrics_aggregation_fn,
         fit_metrics_aggregation_fn=fit_metrics_aggregation_fn,
     )
-    
-    cfg = ServerConfig(num_rounds=int(rc.get("num-server-rounds", 20)))
+
+    # Wire strategy into the closure so on_fit_config_fn can read c_global
+    strategy_ref.append(strategy)
+
+    cfg = ServerConfig(num_rounds=total_rounds)
     return ServerAppComponents(config=cfg, strategy=strategy)
 
-# Create ServerApp
-# ServerApp is the main entry point for the Flower server
-# It orchestrates the federated learning process, manages clients, and controls training and evaluation.
-# When we flwr run, flower reads from the pyproject.toml file and loads the configurations. 
-# 
-# server_fn prepares everything we need to run the server
-# creates the model, defines the strategy, and sets the server config (numberof rounds)
 
 app = ServerApp(server_fn=server_fn)
 
