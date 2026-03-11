@@ -50,13 +50,13 @@ ignore_reinit_error = true
 [tool.flwr.app.config]
 # Server
 num-server-rounds = 75
-fraction-fit = 0.5  # 80% = 26.214 Clients
+fraction-fit = 0.75  # 80% = 26.214 Clients
 
 fraction-evaluate = 1.0
 min-fit-clients = 8191
-min-available-clients = 8191
+min-available-clients = 16384
 min-evaluate-clients = 16384
-local-epochs = 2
+local-epochs = 1
 
 # Datenpfade
 dataset-path = "data/diabetes.csv"
@@ -67,8 +67,8 @@ split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
 # Client
 batch-size = 128  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
 mu = 1e-4
-lr = 1e-2
-lr-after = 1e-2
+lr = 1.5e-2
+lr-after = 1.5e-2
 weight-decay = 1e-5
 pos-weight-boost = 1.5
 clip-grad-norm = 5.0

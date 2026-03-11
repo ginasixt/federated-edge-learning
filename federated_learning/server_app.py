@@ -406,7 +406,7 @@ def server_fn(context: Context) -> ServerAppComponents:
         run_config=rc,
         num_total_clients=num_total_clients,
         # FedAvg parameters
-        fraction_fit=float(rc.get("fraction-fit", 0.8)),
+        fraction_fit=float(rc.get("fraction-fit", 0.75)),
         fraction_evaluate=float(rc.get("fraction-evaluate", 1.0)),
         min_fit_clients=int(rc.get("min-fit-clients", 6)),
         min_available_clients=int(rc.get("min-available-clients", 8)),

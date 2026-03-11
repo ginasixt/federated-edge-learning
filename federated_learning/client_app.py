@@ -19,7 +19,7 @@ from flwr.common.record import ConfigRecord
 from federated_learning.task import load_client_data, make_loaders_from_arrays
 
 os.environ.setdefault("RAY_memory_monitor_refresh_ms", "1000")
-os.environ.setdefault("RAY_memory_usage_threshold", "0.50")
+os.environ.setdefault("RAY_memory_usage_threshold", "0.80")
 os.environ.setdefault("RAY_object_spilling_threshold", "0.92")
 os.environ.setdefault("RAY_CPU_LIMIT", "84")
 os.environ.setdefault("RAY_DEDUP_LOGS", "1")
