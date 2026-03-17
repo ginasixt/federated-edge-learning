@@ -11,13 +11,14 @@ The policy uses the full multi-threshold curve from each round to:
   3. Detect convergence and overtraining across rounds
 
 Usage:
-    python -m federated_learning.tools.select_best_round_screening \\
-        --rounds-dir result/splits_iid_scaling/splits_iid_16384_clients.json/all_rounds/ \\
-        --output-dir result/splits_iid_scaling/splits_iid_16384_clients.json/best_model/ \\
-        --min-recall 0.80 \\
-        --max-alerts 500 \\
-        --strategy recall_constrained \\
+    python3 -m federated_learning.tools.select_best_round_screening \
+        --rounds-dir result/splits_iid_scaling/splits_iid_16384_clients.json/all_rounds_FedProx_1/ \
+        --output-dir result/splits_iid_scaling/splits_iid_16384_clients.json/best_model/ \
+        --min-recall 0.70 \
+        --max-alerts 500 \
+        --strategy recall_constrained \
         --dense-window 10
+
 """
 
 import json
@@ -29,6 +30,32 @@ import argparse
 from federated_learning.screening_policy import ScreeningPolicy
 
 
+def resolve_checkpoint_path(
+    checkpoint_str: str,
+    rounds_dir: Path,
+    json_path: Path,
+    round_num: int,
+) -> Path:
+    """Resolve checkpoint path robustly when JSON contains stale paths."""
+    raw = Path(checkpoint_str)
+
+    candidates = []
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        candidates.append(raw)
+        candidates.append(json_path.parent / raw)
+
+    candidates.append(rounds_dir / raw.name)
+    candidates.append(rounds_dir / f"model_round_{round_num}.pt")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return raw
+
+
 def load_all_rounds(rounds_dir: Path) -> List[Dict]:
     """Load all saved round metric files from an all_rounds/ directory."""
     rounds = []
@@ -36,10 +63,16 @@ def load_all_rounds(rounds_dir: Path) -> List[Dict]:
         try:
             with open(json_file, "r") as f:
                 data = json.load(f)
+            checkpoint = resolve_checkpoint_path(
+                checkpoint_str=data["model_checkpoint"],
+                rounds_dir=rounds_dir,
+                json_path=json_file,
+                round_num=data["round"],
+            )
             rounds.append({
                 "round":      data["round"],
                 "metrics":    data["metrics"],
-                "checkpoint": Path(data["model_checkpoint"]),
+                "checkpoint": checkpoint,
                 "json_path":  json_file,
             })
         except Exception as e:
@@ -49,7 +82,7 @@ def load_all_rounds(rounds_dir: Path) -> List[Dict]:
 
 def apply_screening(
     rounds: List[Dict],
-    min_recall: float = 0.80,
+    min_recall: float = 0.70,
     max_alerts_per_1000: float = 500.0,
     threshold_strategy: str = "recall_constrained",
     dense_window: int = 10,
@@ -98,6 +131,14 @@ def save_best_model(best: Dict, output_dir: Path, run_tag: str = "1") -> None:
 
     src  = best["checkpoint"]
     dst  = output_dir / f"model_round_{best['round']}.pt"
+
+    if not src.exists():
+        raise FileNotFoundError(
+            "Checkpoint file not found for selected round. "
+            f"Resolved path: {src}. "
+            "Please verify round JSON files and checkpoint locations."
+        )
+
     shutil.copy2(src, dst)
 
     m = best.get("metrics") or {}
