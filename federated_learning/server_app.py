@@ -175,18 +175,39 @@ def server_fn(context: Context) -> ServerAppComponents:
 
     total_rounds = int(rc.get("num-server-rounds", 80))
 
-    # Threshold-Grid
-    threshold_grid = [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75]
+    # --- Robust Schedule für viele Clients mit kleinen, unbalancierten Local-Splits ---
+    warmup_rounds = int(rc.get("warmup-rounds", 8))
+    warmup_lr_start = float(rc.get("warmup-lr-start", 1e-3))
+    warmup_lr_end = float(rc.get("warmup-lr-end", 3e-3))
+    warmup_mu_start = float(rc.get("warmup-mu-start", 0.0))
+    warmup_mu_end = float(rc.get("warmup-mu-end", 1e-5))
+
+    lr_main = float(rc.get("lr", 1e-2))
+    lr_after = float(rc.get("lr-after", 5e-3))
+    lr_after_round = int(rc.get("lr-after-round", 60))
+    mu_main = float(rc.get("mu", 1e-4))
+
+    def _linear_round_schedule(rnd: int, total: int, start: float, end: float) -> float:
+        if total <= 1:
+            return float(end)
+        progress = float(rnd - 1) / float(total - 1)
+        progress = max(0.0, min(1.0, progress))
+        return float(start + (end - start) * progress)
     
     
     def on_fit_config_fn(rnd: int) -> dict:
         """Config für Training"""
-        lr = float(rc.get("lr", 1e-2)) if rnd < 3 else float(rc.get("lr-after", 5e-3))
+        if rnd <= warmup_rounds:
+            lr = _linear_round_schedule(rnd, warmup_rounds, warmup_lr_start, warmup_lr_end)
+            mu = _linear_round_schedule(rnd, warmup_rounds, warmup_mu_start, warmup_mu_end)
+        else:
+            lr = lr_main if rnd < lr_after_round else lr_after
+            mu = mu_main
         
         return {
             "epochs": int(rc.get("local-epochs", 1)),
             "lr": lr,
-            "mu": float(rc.get("mu", 1e-3)),
+            "mu": mu,
             "weight-decay": float(rc.get("weight-decay", 1e-4)),
             "clip-grad-norm": float(rc.get("clip-grad-norm", 5.0)),
         }
@@ -202,24 +223,15 @@ def server_fn(context: Context) -> ServerAppComponents:
         # Erste und letzte Runde IMMER evaluieren
         if rnd == 1 or rnd == total_rounds:
             pass  # Evaluation läuft
-        
         # Runden 1-70: Alle 10 Runden
         elif rnd <= 70:
             if rnd % 10 != 0:
                 return {}  # Skip Evaluation, senden leere Config, also kein threshold grid
         
-        
-        
-        # Runden 41-70: Alle 5 Runden
-        # elif rnd <= 70:
-        #     if rnd % 5 != 0:
-        #         return {}  # Skip Evaluation
-        
-        # Runden 66+: Jede Runde (kritische Konvergenz-Phase)
-        # Kein Skip nötig
-        
+  
+
         # ✅ Threshold Grid (nur wenn Eval läuft)
-        threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6]
+        threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65]
         
         return {
             "threshold_grid": json.dumps(threshold_grid),

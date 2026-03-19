@@ -371,7 +371,7 @@ class FlowerClient(NumPyClient):
         # 2) Get threshold grid
         threshold_grid_str = config.get(
             "threshold_grid", 
-            json.dumps([0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55])
+            json.dumps([0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65])
         )
         threshold_grid = json.loads(threshold_grid_str)
         
