@@ -1,0 +1,36 @@
+pos weight boost = 1,5
+(  "pos_weight": 1.29100098549,  )
+weight-decay = 1e-5
+clip-grad-norm = 5.0
+
+min_fit= 60% für Training  
+rounds=80
+fraction-fit = 0.8
+no local epochs
+
+Runden 1-8 (Warmup Phase):
+  Linear Schedule: 1e-3 (0.001) → 3e-3 (0.003)
+  
+Runden 9-59 (Main Training Phase):
+  Konstant: 1e-2 (0.01)
+  
+Runden 60-75 (Cool-down Phase):
+  Konstant: 5e-3 (0.005)
+
+warmup-mu-start = 0.0
+warmup-mu-end = 1e-5
+Also:
+Runden 1-8 (Warmup Phase):
+  Linear Schedule: 0.0 → 1e-5 (0.00001)
+  
+Runden 9-75 (Rest):
+  Konstant: 1e-4 (0.0001)
+
+  lr-after-round = 60
+
+# Warm-up (stabilisiert frühe Runden bei vielen Clients mit wenig Samples)
+warmup-rounds = 8
+warmup-lr-start = 1e-3
+warmup-lr-end = 3e-3
+warmup-mu-start = 0.0
+warmup-mu-end = 1e-5
