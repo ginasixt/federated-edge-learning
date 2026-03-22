@@ -1,3 +1,53 @@
+pos weight boost = 1,5
+(  "pos_weight": 1.29100098549,  )
+weight-decay = 1e-4 auch HÖHER
+clip-grad-norm = 5.0
+
+min_fit= 60% für Training  
+rounds=80
+fraction-fit = 0.8
+no local epochs
+
+Runden 1-10 (Warmup Phase):
+  Linear Schedule: 2e-3 (0.002) → 5e-2 (0.05)
+  
+Runden 11-60 (Main Training Phase):
+  Konstant: 5e-2 (0.05)
+  
+Runden 61-80 (Cool-down Phase - Cosine Annealing (dynamisch berechnet)):
+  Cosine Annealing (dynamisch berechnet): von 5e-2 zu 2e-2 (0.02)
+
+
+
+mu = 5e-4  # ✅ VARIANTE A: 5x höher (stärkere FedProx-Ridge)
+lr = 5e-2  # ✅ VARIANTE A: 5x höher (0.05 statt 0.01) - aggressives Lernen
+lr-after = 2e-2  # ✅ VARIANTE A: erhöht auf 0.02
+lr-after-round = 60
+
+# Warm-up (stabilisiert frühe Runden bei vielen Clients mit wenig Samples)
+warmup-rounds = 10  # ✅ VARIANTE A: längere Warmup (10 statt 8) für kontrollierte Eskalation
+warmup-lr-start = 2e-3  # ✅ VARIANTE A: höherer Start
+warmup-lr-end = 5e-2  # ✅ VARIANTE A: höheres Ende
+warmup-mu-start = 0.0
+warmup-mu-end = 5e-4  # ✅ VARIANTE A: erhöht
+
+Also:
+Runden 1-8 (Warmup Phase):
+  Linear Schedule: 0.0 → 5e-4 (0.00001)
+  
+Runden 9-75 (Rest):
+  Konstant: 5e-4 (0.0001)
+
+weight-decay = 1e-4  # ✅ VARIANTE A: 10x höher (stärkere L2-Regularisierung)
+
+
+
+
+
+
+
+Alles:
+
 # =====================================================================
 # For a full TOML configuration guide, check the Flower docs:
 # https://flower.ai/docs/framework/how-to-configure-pyproject-toml.html

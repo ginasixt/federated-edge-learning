@@ -49,7 +49,7 @@ ignore_reinit_error = true
 # Custom config values accessible via `context.run_config`
 [tool.flwr.app.config]
 # Server
-num-server-rounds = 75
+num-server-rounds = 80
 fraction-fit = 0.8  # 80% = 26.214 Clients
 fraction-evaluate = 1.0  # 100% = 32.768 Clients
 min-fit-clients = 9830
@@ -65,19 +65,19 @@ split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
 
 # Client
 batch-size = 128  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
-mu = 1e-4
-lr = 1e-2
-lr-after = 5e-3
+mu = 5e-4  # ✅ VARIANTE A: 5x höher (stärkere FedProx-Ridge)
+lr = 5e-2  # ✅ VARIANTE A: 5x höher (0.05 statt 0.01) - aggressives Lernen
+lr-after = 2e-2  # ✅ VARIANTE A: erhöht auf 0.02
 lr-after-round = 60
 
 # Warm-up (stabilisiert frühe Runden bei vielen Clients mit wenig Samples)
-warmup-rounds = 8
-warmup-lr-start = 1e-3
-warmup-lr-end = 3e-3
+warmup-rounds = 10  # ✅ VARIANTE A: längere Warmup (10 statt 8) für kontrollierte Eskalation
+warmup-lr-start = 2e-3  # ✅ VARIANTE A: höherer Start
+warmup-lr-end = 5e-2  # ✅ VARIANTE A: höheres Ende
 warmup-mu-start = 0.0
-warmup-mu-end = 1e-5
+warmup-mu-end = 5e-4  # ✅ VARIANTE A: erhöht
 
-weight-decay = 1e-5
+weight-decay = 1e-4  # ✅ VARIANTE A: 10x höher (stärkere L2-Regularisierung)
 pos-weight-boost = 1.5
 clip-grad-norm = 5.0
 eval-threshold = 0.35
@@ -93,7 +93,7 @@ default = "local-simulation"
 
 # Local simulation federation with 32768 virtual SuperNodes
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 32768
+options.num-supernodes = 16384
 
 # ✅ KRITISCH: Minimale Resource Limits für maximale Parallelität!
 options.backend.client-resources.num-cpus = 0.1  # ✅ 100 CPUs ÷ 0.1 = 1000 Clients parallel!

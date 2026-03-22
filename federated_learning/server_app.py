@@ -188,21 +188,89 @@ def server_fn(context: Context) -> ServerAppComponents:
     mu_main = float(rc.get("mu", 1e-4))
 
     def _linear_round_schedule(rnd: int, total: int, start: float, end: float) -> float:
+        """Linear schedule: mostly for warmup phase."""
         if total <= 1:
             return float(end)
         progress = float(rnd - 1) / float(total - 1)
         progress = max(0.0, min(1.0, progress))
         return float(start + (end - start) * progress)
     
+    def _cosine_annealing_schedule(rnd: int, total_rounds: int, lr_max: float, lr_min: float) -> float:
+        """
+        Cosine Annealing Schedule (smooth, mathematically elegant).
+        
+        Uses: lr = lr_min + 0.5 * (lr_max - lr_min) * (1 + cos(π * t / T))
+        
+        This creates a smooth decay from lr_max to lr_min over total_rounds.
+        - Start: lr_max (rnd=1)
+        - Middle: smooth decline
+        - End (rnd=total_rounds): approaches lr_min
+        """
+        if total_rounds <= 1:
+            return float(lr_min)
+        
+        t = float(rnd - 1)  # Progress from 0 to total_rounds-1
+        T = float(total_rounds - 1)
+        
+        # Cosine annealing formula
+        lr = lr_min + 0.5 * (lr_max - lr_min) * (1.0 + np.cos(np.pi * t / T))
+        return float(lr)
+    
     
     def on_fit_config_fn(rnd: int) -> dict:
-        """Config für Training"""
+        """
+        ✅ 3-PHASE TRAINING SCHEDULE (Optimal für Federated Learning):
+        
+        PHASE 1: Warmup (Runden 1-10)
+          - LR linear: 1e-3 → 5e-2 (sanfte Stabilisierung)
+          - Mu linear: 0.0 → 5e-4 (FedProx hochfahren)
+        
+        PHASE 2: Stable Training (Runden 11-60)
+          - LR konstant: 5e-2 (aggressives Lernen)
+          - Mu konstant: 5e-4 (starke Regularisierung)
+          ⭐ Das Herzstück des Trainings!
+        
+        PHASE 3: Cosine Annealing (Runden 61-75)
+          - LR cosine decay: 5e-2 → 2e-2 (sanfte Konvergenz)
+          - Mu leicht reduzieren: 5e-4 → 1e-4 (weniger Ridge am Ende)
+        
+        Vorteile:
+        - Stabil: Warmup → Plateau → Decay
+        - LR: Aggressive dann graduell weniger
+        - Mu: KONSTANT während Haupttraining (Ridge-Stärke!)
+        """
+        
+        # Phase 1: Warmup (Runden 1-10)
         if rnd <= warmup_rounds:
             lr = _linear_round_schedule(rnd, warmup_rounds, warmup_lr_start, warmup_lr_end)
             mu = _linear_round_schedule(rnd, warmup_rounds, warmup_mu_start, warmup_mu_end)
+        
+        # Phase 2: Stable Training (Runden 11-60) - KONSTANTE LR & MU!
+        elif rnd <= 60:
+            lr = lr_main              # Konstant: 5e-2
+            mu = mu_main              # Konstant: 5e-4 (volle FedProx Stärke!)
+        
+        # Phase 3: Cosine Annealing (Runden 61-80, dynamisch berechnet)
         else:
-            lr = lr_main if rnd < lr_after_round else lr_after
-            mu = mu_main
+            remaining_rounds = total_rounds - 60  # Z.B. 80 - 60 = 20 Runden für Annealing
+            round_in_cosine = rnd - 60  # 1-indexed in cosine phase
+            
+            # LR smooth decay: 5e-2 → 2e-2
+            lr = _cosine_annealing_schedule(
+                rnd=round_in_cosine,
+                total_rounds=remaining_rounds,
+                lr_max=lr_main,      # 5e-2
+                lr_min=lr_after       # 2e-2
+            )
+            
+            # Mu: Nur leicht reduzieren (Ridge bleibt wichtig!)
+            # Decay von 5e-4 → 1e-4 (aber nicht so aggressiv wie LR)
+            mu = _cosine_annealing_schedule(
+                rnd=round_in_cosine,
+                total_rounds=remaining_rounds,
+                lr_max=mu_main,       # 5e-4
+                lr_min=float(1e-4)    # 1e-4 (weniger aggressiv als wegfallen)
+            )
         
         return {
             "epochs": int(rc.get("local-epochs", 1)),
