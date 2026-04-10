@@ -138,7 +138,9 @@ def evaluate_multi_threshold(
     
     auc = 0.0
     
-    # Berechne Metriken
+    # ============================================================
+    # 1) MULTI-THRESHOLD METRIKEN (wie vorher)
+    # ============================================================
     thresholds = []
     tp_list = []
     fp_list = []
@@ -159,15 +161,86 @@ def evaluate_multi_threshold(
         tn_list.append(tn)
         fn_list.append(fn)
     
+    # ============================================================
+    # 2) CALIBRATION PLOT METRIKEN (10 Bins) - Privacy-Safe
+    # ============================================================
+    num_calib_bins = 10
+    calib_edges = np.linspace(0.0, 1.0, num_calib_bins + 1)
+    calib_bin_n = []
+    calib_bin_sum_pred = []
+    calib_bin_sum_true = []
+    
+    for i in range(num_calib_bins):
+        lower = calib_edges[i]
+        upper = calib_edges[i + 1]
+        
+        # Maske für Samples in diesem Bin
+        if i == num_calib_bins - 1:
+            mask = (probs >= lower) & (probs <= upper)  # Letztes Bin inclusive
+        else:
+            mask = (probs >= lower) & (probs < upper)
+        
+        n_in_bin = int(mask.sum())
+        sum_pred = float(probs[mask].sum()) if n_in_bin > 0 else 0.0
+        sum_true = int(y[mask].sum()) if n_in_bin > 0 else 0
+        
+        calib_bin_n.append(n_in_bin)
+        calib_bin_sum_pred.append(sum_pred)
+        calib_bin_sum_true.append(sum_true)
+    
+    # ============================================================
+    # 3) RISK DISTRIBUTION PLOT METRIKEN (20 Bins) - Privacy-Safe
+    # ============================================================
+    num_risk_bins = 20
+    risk_edges = np.linspace(0.0, 1.0, num_risk_bins + 1)
+    
+    # Histogram für y=0 (negative class)
+    hist_pred_y0 = []
+    for i in range(num_risk_bins):
+        lower = risk_edges[i]
+        upper = risk_edges[i + 1]
+        
+        if i == num_risk_bins - 1:
+            mask = (probs >= lower) & (probs <= upper) & (y == 0)
+        else:
+            mask = (probs >= lower) & (probs < upper) & (y == 0)
+        
+        count = int(mask.sum())
+        hist_pred_y0.append(count)
+    
+    # Histogram für y=1 (positive class)
+    hist_pred_y1 = []
+    for i in range(num_risk_bins):
+        lower = risk_edges[i]
+        upper = risk_edges[i + 1]
+        
+        if i == num_risk_bins - 1:
+            mask = (probs >= lower) & (probs <= upper) & (y == 1)
+        else:
+            mask = (probs >= lower) & (probs < upper) & (y == 1)
+        
+        count = int(mask.sum())
+        hist_pred_y1.append(count)
+    
     # JSON-Serialisierung
     metrics = {
         "auc": auc,
         "n_samples": n_samples,
+        # Multi-Threshold
         "thresholds_json": json.dumps(thresholds), 
         "tp_json": json.dumps(tp_list),             
         "fp_json": json.dumps(fp_list),
         "tn_json": json.dumps(tn_list),
         "fn_json": json.dumps(fn_list),
+        # Calibration Plot (10 Bins)
+        "calib_edges_json": json.dumps(calib_edges.tolist()),
+        "calib_bin_n_json": json.dumps(calib_bin_n),
+        "calib_bin_sum_pred_json": json.dumps(calib_bin_sum_pred),
+        "calib_bin_sum_true_json": json.dumps(calib_bin_sum_true),
+        # Risk Distribution (20 Bins)
+        "risk_edges_json": json.dumps(risk_edges.tolist()),
+        "hist_pred_y0_json": json.dumps(hist_pred_y0),
+        "hist_pred_y1_json": json.dumps(hist_pred_y1),
     }
     
     avg_loss = total_loss / max(1, n_samples)
@@ -245,12 +318,11 @@ class FlowerClient(NumPyClient):
         
         if self.cid not in train_mapping:
             raise KeyError(f"cid {self.cid} fehlt in train mapping")
-        if self.cid not in val_mapping:
-            raise KeyError(f"cid {self.cid} fehlt in val mapping")
         
         # Client-spezifische Indices
         client_train_idx = train_mapping[self.cid]
-        client_val_idx = val_mapping[self.cid]
+        # ✅ Val ist optional: Manche Clients haben keine Val-Daten
+        client_val_idx = val_mapping.get(self.cid, [])
 
         print(f"[Client {self.cid}] Data split:")
         print(f"   Train:      {len(client_train_idx)} samples (client-local)")

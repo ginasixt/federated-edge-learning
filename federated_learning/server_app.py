@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import torch
+import json
+import numpy as np
+import random
 from pathlib import Path
 from flwr.server import ServerApp, ServerConfig
 from flwr.server.strategy import FedAvg
 from flwr.common import Context, Parameters, FitRes, ndarrays_to_parameters, parameters_to_ndarrays
 from flwr.common.record import ConfigRecord
 from federated_learning.client_app import MLP
-import json
-import numpy as np
 
 try:
     from flwr.server.app import ServerAppComponents
@@ -23,6 +24,7 @@ class FedAvgWithScreening(FedAvg):
     1. Caches parameters in RAM after aggregation
     2. Tracks metrics with ScreeningPolicy
     3. Saves checkpoints for best rounds
+    4. ✅ Only samples clients with actual validation data for evaluation (efficiency!)
     """
     
     def __init__(
@@ -44,6 +46,21 @@ class FedAvgWithScreening(FedAvg):
         
         # RAM-Cache: {server_round: Parameters}
         self.parameters_cache: dict[int, Parameters] = {}
+        
+        # ✅ Lade Val-Client-Range aus Split Meta für effiziente Evaluation
+        split_path = run_config.get("split-path")
+        self.val_client_range = None
+        if split_path:
+            try:
+                with open(split_path, "r") as f:
+                    split_data = json.load(f)
+                    meta = split_data.get("meta", {})
+                    self.val_client_range = meta.get("val_client_range")
+                    if self.val_client_range:
+                        print(f"✅ Val-Client-Range geladen: {self.val_client_range['min']}-{self.val_client_range['max']}")
+            except Exception as e:
+                print(f"⚠️  Konnte Val-Client-Range nicht laden: {e}")
+                self.val_client_range = None
     
     def aggregate_fit(
         self,
@@ -70,6 +87,41 @@ class FedAvgWithScreening(FedAvg):
             del self.parameters_cache[oldest]
         
         return aggregated_parameters, aggregated_metrics
+    
+    def select_for_evaluate(self, server_round: int, available_clients, num_to_select: int):
+        """
+        ✅ OPTIMIZATION: Nur Val-Clients evaluieren!
+        
+        Nutzt die Val-Client-Range aus dem Split Meta (viel effizienter als Liste laden).
+        Standard Flower sampelt zufällig alle Clients.
+        Aber Clients ohne Val-Daten→ n_val=0 (Rechenaufwand verschwendet!)
+        
+        Diese Methode sampelt nur aus Clients mit echten Val-Daten.
+        → Spart Rechenaufwand + schneller Evaluation
+        """
+        # Speichere alle verfügbaren Client-IDs (als Ints)
+        all_cids = [int(client.node_id) for client in available_clients]
+        
+        # Filtere nur Val-Clients (aus Range)
+        if self.val_client_range:
+            min_cid = self.val_client_range.get("min", 0)
+            max_cid = self.val_client_range.get("max", 0)
+            val_clients = [c for c in all_cids if min_cid <= c <= max_cid]
+        else:
+            # Fallback: Wenn Range nicht geladen, nehme alle
+            val_clients = all_cids
+        
+        # Sample aus Val-Clients
+        if val_clients:
+            num_to_select = min(num_to_select, len(val_clients))
+            selected_ids = set(random.sample(val_clients, num_to_select))
+        else:
+            selected_ids = set()
+        
+        # Gebe nur die selected Clients zurück
+        selected_clients = [c for c in available_clients if int(c.node_id) in selected_ids]
+        
+        return selected_clients
     
     def aggregate_evaluate(
         self,
@@ -120,6 +172,22 @@ class FedAvgWithScreening(FedAvg):
                 json.dump(metrics_with_meta, f, indent=2)
             
             print(f"💾 Round {server_round}: Saved {checkpoint_path.name} + {json_path.name}")
+            
+            # 6) OPTIONAL: Generiere Calibration & Risk Distribution Plots
+            # try:
+            #     from federated_learning.plotting.calibration_and_risk_plots import generate_both_plots
+                
+            #     plots_dir = self.checkpoint_dir / "plots"
+            #     generate_both_plots(
+            #         metrics,
+            #         output_dir=plots_dir,
+            #         round_num=server_round,
+            #         show=False  # Nicht im Background anzeigen
+            #     )
+            # except ImportError:
+            #     pass  # Plots sind optional
+            # except Exception as e:
+            #     print(f"⚠️  Plot generation failed: {e}")
         
         return loss, metrics
     
@@ -416,7 +484,105 @@ def server_fn(context: Context) -> ServerAppComponents:
             metrics["threshold"] = thr
             threshold_results.append(metrics)
         
-        # 4) Minimales Logging (für Live-Monitoring während Training)
+        # ============================================================
+        # 4) CALIBRATION PLOT AGGREGATION (10 Bins)
+        # ============================================================
+        calib_aggregated = {}
+        
+        for n, md in processed_metrics:
+            try:
+                calib_edges = json.loads(md.get("calib_edges_json", "[]"))
+                calib_bin_n = json.loads(md.get("calib_bin_n_json", "[]"))
+                calib_bin_sum_pred = json.loads(md.get("calib_bin_sum_pred_json", "[]"))
+                calib_bin_sum_true = json.loads(md.get("calib_bin_sum_true_json", "[]"))
+            except json.JSONDecodeError:
+                continue
+            
+            if not calib_bin_n:  # Skip wenn leer
+                continue
+            
+            # Initialize aggregate bins if not done yet
+            if not calib_aggregated:
+                num_bins = len(calib_bin_n)
+                calib_aggregated = {
+                    "edges": calib_edges,
+                    "bin_n": [0] * num_bins,
+                    "bin_sum_pred": [0.0] * num_bins,
+                    "bin_sum_true": [0] * num_bins,
+                }
+            
+            # Aggregiere Bin-Counts
+            for i in range(len(calib_bin_n)):
+                calib_aggregated["bin_n"][i] += int(calib_bin_n[i])
+                calib_aggregated["bin_sum_pred"][i] += float(calib_bin_sum_pred[i])
+                calib_aggregated["bin_sum_true"][i] += int(calib_bin_sum_true[i])
+        
+        # Berechne Calibration Metriken
+        calibration_results = []
+        if calib_aggregated:
+            for i in range(len(calib_aggregated["bin_n"])):
+                n_bin = calib_aggregated["bin_n"][i]
+                if n_bin > 0:
+                    mean_pred = calib_aggregated["bin_sum_pred"][i] / n_bin
+                    mean_obs = calib_aggregated["bin_sum_true"][i] / n_bin
+                else:
+                    mean_pred = 0.0
+                    mean_obs = 0.0
+                
+                calibration_results.append({
+                    "bin_index": i,
+                    "bin_edge_lower": float(calib_aggregated["edges"][i]),
+                    "bin_edge_upper": float(calib_aggregated["edges"][i + 1]) if i + 1 < len(calib_aggregated["edges"]) else 1.0,
+                    "n_samples": n_bin,
+                    "mean_predicted_prob": mean_pred,
+                    "mean_observed_freq": mean_obs,
+                })
+        
+        # ============================================================
+        # 5) RISK DISTRIBUTION AGGREGATION (20 Bins)
+        # ============================================================
+        risk_aggregated = {}
+        
+        for n, md in processed_metrics:
+            try:
+                risk_edges = json.loads(md.get("risk_edges_json", "[]"))
+                hist_pred_y0 = json.loads(md.get("hist_pred_y0_json", "[]"))
+                hist_pred_y1 = json.loads(md.get("hist_pred_y1_json", "[]"))
+            except json.JSONDecodeError:
+                continue
+            
+            if not hist_pred_y0:  # Skip wenn leer
+                continue
+            
+            # Initialize aggregate histograms if not done yet
+            if not risk_aggregated:
+                num_bins = len(hist_pred_y0)
+                risk_aggregated = {
+                    "edges": risk_edges,
+                    "hist_y0": [0] * num_bins,
+                    "hist_y1": [0] * num_bins,
+                }
+            
+            # Aggregiere Histogramm-Counts
+            for i in range(len(hist_pred_y0)):
+                risk_aggregated["hist_y0"][i] += int(hist_pred_y0[i])
+                risk_aggregated["hist_y1"][i] += int(hist_pred_y1[i])
+        
+        # Berechne Risk Distribution Metriken
+        risk_distribution = []
+        if risk_aggregated:
+            for i in range(len(risk_aggregated["hist_y0"])):
+                risk_distribution.append({
+                    "bin_index": i,
+                    "bin_edge_lower": float(risk_aggregated["edges"][i]),
+                    "bin_edge_upper": float(risk_aggregated["edges"][i + 1]) if i + 1 < len(risk_aggregated["edges"]) else 1.0,
+                    "count_y0": risk_aggregated["hist_y0"][i],
+                    "count_y1": risk_aggregated["hist_y1"][i],
+                })
+        
+        # ============================================================
+        # 6) Minimales Logging (für Live-Monitoring während Training)
+        # ============================================================
         print(f"\n📊 Multi-Threshold Aggregation:")
         print(f"   Valid clients: {len(processed_metrics)}")
         print(f"   Evaluated {len(threshold_results)} thresholds:")
@@ -428,10 +594,17 @@ def server_fn(context: Context) -> ServerAppComponents:
         if len(threshold_results) > 3:
             print(f"     ... (+ {len(threshold_results)-3} more)\n")
         
-        # 5) Gib ALLE Threshold-Ergebnisse zurück (Post-Training Screening wählt beste)
+        print(f"📈 Calibration Plot: {len(calibration_results)} bins aggregated")
+        print(f"📊 Risk Distribution: {len(risk_distribution)} bins aggregated\n")
+        
+        # ============================================================
+        # 7) Gib ALLE Ergebnisse zurück (Plots & Post-Training Screening)
+        # ============================================================
         return {
             "auc": aggregated_auc,
-            "all_thresholds": threshold_results  # Alle Thresholds für Screening-Tool
+            "all_thresholds": threshold_results,  # Alle Thresholds für Screening-Tool
+            "calibration": calibration_results,   # Für Calibration Plot
+            "risk_distribution": risk_distribution,  # Für Risk Distribution Plot
         }
     
     def fit_metrics_aggregation_fn(metrics):
