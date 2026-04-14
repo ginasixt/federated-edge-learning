@@ -61,7 +61,7 @@ def _compute_auprc_from_curve(threshold_entries: List[Dict]) -> float:
       so it reflects actual screening quality without TN inflation.
 
     Entries are sorted by recall ascending (higher threshold → fewer predicted positives
-    → lower recall). Anchored at (recall=0, prec=1.0).
+    → lower recall). Anchored at (recall=0, prec=1.0). 
     """
     if not threshold_entries:
         return 0.0
@@ -99,11 +99,44 @@ def _compute_mcc_from_entry(e: Dict) -> float:
     return (tp * tn - fp * fn) / denom if denom > 0 else 0.0
 
 
+def _compute_net_benefit(e: Dict, cost_ratio: float = 0.3) -> float:
+    """
+    Compute Net Benefit for medical decision-making.
+
+    NB = recall - cost_ratio * (1 - specificity)
+
+    This is used in Decision Curve Analysis (DCA) for medical screening.
+    
+    Parameters
+    ----------
+    e : dict
+        Threshold entry with 'recall' and 'spec' fields
+    cost_ratio : float
+        Cost ratio: cost_of_false_positive / cost_of_false_negative
+        For diabetes screening: ~0.3 (FN is ~3x more costly than FP)
+    
+    Returns
+    -------
+    float
+        Net Benefit score (higher is better)
+    """
+    tp = float(e.get("tp", 0.0))
+    fp = float(e.get("fp", 0.0))
+    fn = float(e.get("fn", 0.0))
+    tn = float(e.get("tn", 0.0))
+    t = cost_ratio
+
+    N = tp + fp + tn + fn
+
+    return (tp / N) - (fp / N) * (t / (1 - t))
+
+
 def _select_threshold(
     threshold_entries: List[Dict],
     strategy: str,
     min_recall: float,
     max_alerts_per_1000: float,
+    cost_ratio: float = 0.3,
 ) -> Optional[Dict]:
     """
     Pick the best threshold entry from a round's all_thresholds list.
@@ -128,6 +161,13 @@ def _select_threshold(
     npv_spec
         Among entries with recall >= min_recall, maximise NPV * specificity.
         Use when missing a positive is catastrophic but over-alerting is very costly.
+
+    net_benefit
+        Among entries with recall >= min_recall, maximise Net Benefit.
+        NB = recall - cost_ratio * (1 - specificity)
+        cost_ratio is the ratio of FP cost to FN cost.
+        For medical screening, this enforces patient safety while minimising
+        operational burden (alerts_per_1000).
     """
     if not threshold_entries:
         return None
@@ -162,10 +202,19 @@ def _select_threshold(
                        key=lambda e: float(e.get("npv", 0.0)) * float(e.get("spec", 0.0)))
         return max(pool, key=lambda e: float(e.get("youden", 0.0)))
 
+    elif strategy == "net_benefit":
+        high_recall = [e for e in pool
+                       if float(e.get("recall", e.get("tpr", 0.0))) >= min_recall]
+        if high_recall:
+            return max(high_recall, 
+                       key=lambda e: _compute_net_benefit(e, cost_ratio))
+        # Fallback: highest net benefit available
+        return max(pool, key=lambda e: _compute_net_benefit(e, cost_ratio))
+
     else:
         raise ValueError(
             f"Unknown threshold strategy: {strategy!r}. "
-            f"Choose from: youden, recall_constrained, balanced_accuracy, f1, npv_spec"
+            f"Choose from: youden, recall_constrained, balanced_accuracy, f1, npv_spec, net_benefit"
         )
 
 
@@ -190,8 +239,13 @@ class ScreeningPolicy:
         of alerts per 1000 patients. Default = 500.
     threshold_strategy : str
         How to pick the best threshold within each round.
-        One of: "youden", "recall_constrained", "balanced_accuracy", "f1", "npv_spec".
+        One of: "youden", "recall_constrained", "balanced_accuracy", "f1", "npv_spec", "net_benefit".
         Default = "recall_constrained" (safety-first).
+    cost_ratio : float
+        Cost ratio for net_benefit strategy: cost_of_FP / cost_of_FN.
+        For diabetes screening: ~0.3-0.4 (FN is 2.5-3x more costly than FP).
+        Only used if threshold_strategy == "net_benefit".
+        Default = 0.3.
     convergence_window : int
         Number of recent rounds used for convergence/stability detection.
         Set this to the number of rounds you evaluated densely at the end
@@ -209,6 +263,7 @@ class ScreeningPolicy:
         min_recall: float = 0.70,
         max_alerts_per_1000: float = 500.0,
         threshold_strategy: str = "recall_constrained",
+        cost_ratio: float = 0.5,
         convergence_window: int = 10,
         convergence_delta: float = 0.005,
         overtraining_drop: float = 0.03,
@@ -216,13 +271,17 @@ class ScreeningPolicy:
         self.min_recall = min_recall
         self.max_alerts_per_1000 = max_alerts_per_1000
         self.threshold_strategy = threshold_strategy
+        self.cost_ratio = cost_ratio
         self.convergence_window = convergence_window
         self.convergence_delta = convergence_delta
         self.overtraining_drop = overtraining_drop
 
         # Internal history list — each entry is an enriched round dict:
-        #   {round, raw_metrics, all_threshold_entries, selected, auc}
+        #   {round, raw_metrics, all_threshold_entries, selected, auc, net_benefit}
         self._history: List[Dict[str, Any]] = []
+        
+        # Track best thresholds per round for summary
+        self._best_thresholds_per_round: List[Dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -251,6 +310,7 @@ class ScreeningPolicy:
             strategy=self.threshold_strategy,
             min_recall=self.min_recall,
             max_alerts_per_1000=self.max_alerts_per_1000,
+            cost_ratio=self.cost_ratio,
         )
 
         # AUPRC — PR-curve AUC, correct metric for imbalanced data
@@ -258,6 +318,9 @@ class ScreeningPolicy:
 
         # MCC at the selected operating point
         mcc = _compute_mcc_from_entry(selected) if selected else 0.0
+        
+        # Net Benefit at the selected operating point
+        net_benefit = _compute_net_benefit(selected, self.cost_ratio) if selected else 0.0
 
         self._history.append({
             "round": int(rnd),
@@ -267,7 +330,21 @@ class ScreeningPolicy:
             "auc":   auc,
             "auprc": auprc,
             "mcc":   mcc,
+            "net_benefit": net_benefit,
         })
+        
+        # Track best threshold per round for summary
+        if selected:
+            self._best_thresholds_per_round.append({
+                "round": int(rnd),
+                "threshold": selected.get("threshold"),
+                "recall": float(selected.get("recall", selected.get("tpr", 0.0))),
+                "spec": float(selected.get("spec", 0.0)),
+                "ppv": float(selected.get("ppv", selected.get("precision", 0.0))),
+                "npv": float(selected.get("npv", 0.0)),
+                "alerts_per_1000": float(selected.get("alerts_per_1000", 0.0)),
+                "net_benefit": net_benefit,
+            })
 
     def best(self) -> Optional[Dict[str, Any]]:
         """
@@ -381,6 +458,10 @@ class ScreeningPolicy:
     def _balanced_acc(self, h: Dict) -> float:
         s = h.get("selected") or {}
         return float(s.get("balanced_accuracy", 0.0))
+    
+    def _net_benefit(self, h: Dict) -> float:
+        """Net Benefit at the selected operating point — cached in h['net_benefit']."""
+        return float(h.get("net_benefit", 0.0))
 
     # ------------------------------------------------------------------
     # Scoring
@@ -590,11 +671,17 @@ class ScreeningPolicy:
         """
         Select the best round using a layered funnel:
 
+        For net_benefit strategy:
         1. Hard recall filter  — patient safety (non-negotiable)
         2. Soft alerts filter  — operational capacity
-        3. Pareto filter       — remove rounds dominated in (AUC, Youden's J)
-        4. Composite score     — AUC · 0.30 + Youden · 0.25 + recall · 0.20
-                                 + spec · 0.15 + NPV · 0.05 + stability · 0.05
+        3. Select round with max net_benefit
+        4. Tie-breaking: if NB diff < 0.01, prefer higher PPV or lower alerts
+
+        For other strategies:
+        1. Hard recall filter  — patient safety (non-negotiable)
+        2. Soft alerts filter  — operational capacity
+        3. Pareto filter       — remove rounds dominated in (AUPRC, MCC)
+        4. Composite score     — weighted multi-metric score
         """
         if not self._history:
             return None
@@ -622,14 +709,37 @@ class ScreeningPolicy:
             print(f"  WARNING: No round meets alerts <= {self.max_alerts_per_1000:.0f}/1000.")
             print(f"           Best available: {best_alerts:.0f}/1000 (capacity review needed).")
 
-        # ── 3. Pareto filter on (AUPRC, MCC) ─────────────────────────
-        pareto = [h for h in candidates if self._is_pareto_optimal(h, candidates)]
-        if pareto:
-            candidates = pareto
-            print(f"  {len(pareto)} Pareto-optimal rounds (AUPRC vs MCC)")
+        # ── 3. Strategy-specific selection ──────────────────────────────
+        if self.threshold_strategy == "net_benefit":
+            # Find max net benefit
+            best = max(candidates, key=self._net_benefit)
+            best_nb = self._net_benefit(best)
+            
+            # Tie-breaking: if other rounds within 0.01 of best NB
+            #   prefer higher PPV or fewer alerts
+            tied_tolerance = 0.01
+            tied_candidates = [
+                h for h in candidates 
+                if abs(self._net_benefit(h) - best_nb) < tied_tolerance
+            ]
+            
+            if len(tied_candidates) > 1:
+                print(f"  Tie-breaking: {len(tied_candidates)} rounds within NB tolerance {tied_tolerance}")
+                # Primary: max PPV; Secondary: min alerts
+                best = max(tied_candidates, 
+                          key=lambda h: (
+                              float((h.get("selected") or {}).get("ppv", 0.0)),
+                              -float((h.get("selected") or {}).get("alerts_per_1000", 1000.0))
+                          ))
+        else:
+            # ── 3. Pareto filter on (AUPRC, MCC) ─────────────────────────
+            pareto = [h for h in candidates if self._is_pareto_optimal(h, candidates)]
+            if pareto:
+                candidates = pareto
+                print(f"  {len(pareto)} Pareto-optimal rounds (AUPRC vs MCC)")
 
-        # ── 4. Composite score ─────────────────────────────────────────
-        best = max(candidates, key=self._composite_score)
+            # ── 4. Composite score ─────────────────────────────────────────
+            best = max(candidates, key=self._composite_score)
 
         # ── Logging ───────────────────────────────────────────────────
         s    = best.get("selected") or {}
@@ -647,8 +757,11 @@ class ScreeningPolicy:
         print(f"    F1:                 {self._f1(best):.4f}")
         print(f"    Balanced accuracy:  {self._balanced_acc(best):.4f}")
         print(f"    Alerts/1000:        {self._alerts(best):.1f}")
+        if self.threshold_strategy == "net_benefit":
+            print(f"    Net Benefit:        {self._net_benefit(best):.4f}  (cost_ratio={self.cost_ratio})")
         print(f"    Threshold used:     {s.get('threshold', '?')}")
-        print(f"    Composite score:    {self._composite_score(best):.4f}")
+        if self.threshold_strategy != "net_benefit":
+            print(f"    Composite score:    {self._composite_score(best):.4f}")
         print(f"    Stability score:    {self._stability_score(best['round']):.4f}")
         print(f"    Convergence:        {conv['reason']} "
               f"(MCC std={conv.get('mcc_std', '?')} "
@@ -670,10 +783,12 @@ class ScreeningPolicy:
             "auc":                   best["auc"],
             "auprc":                 self._auprc(best),
             "mcc":                   self._mcc(best),
+            "net_benefit":           self._net_benefit(best),
             "selected_threshold":    s.get("threshold"),
             "metrics":               s,
             "all_threshold_entries": best["all_threshold_entries"],
-            "composite_score":       self._composite_score(best),
+            "composite_score":       self._composite_score(best) if self.threshold_strategy != "net_benefit" else None,
             "convergence_info":      conv,
             "overtraining_info":     ot,
+            "best_thresholds_per_round": self._best_thresholds_per_round,
         }

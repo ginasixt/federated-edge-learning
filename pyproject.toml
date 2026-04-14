@@ -64,22 +64,22 @@ norm-stats-json = "data/norm_stats.json"
 split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
 
 # Client
-batch-size = 128  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
-mu = 5e-4  # ✅ VARIANTE A: 5x höher (stärkere FedProx-Ridge)
-lr = 5e-2  # ✅ VARIANTE A: 5x höher (0.05 statt 0.01) - aggressives Lernen
-lr-after = 2e-2  # ✅ VARIANTE A: erhöht auf 0.02
+batch-size = 256  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
+mu = 1e-3  # ✅ VARIANTE B: 2x höher als FedProx_4 (sehr starke FedProx-Ridge)
+lr = 8e-2  # ✅ VARIANTE B: 1.6x höher als FedProx_4 (noch aggressiveres Lernen)
+lr-after = 3e-2  # ✅ VARIANTE B: 1.5x höher als FedProx_4
 lr-after-round = 60
 
 # Warm-up (stabilisiert frühe Runden bei vielen Clients mit wenig Samples)
-warmup-rounds = 10  # ✅ VARIANTE A: längere Warmup (10 statt 8) für kontrollierte Eskalation
-warmup-lr-start = 2e-3  # ✅ VARIANTE A: höherer Start
-warmup-lr-end = 5e-2  # ✅ VARIANTE A: höheres Ende
+warmup-rounds = 12  # ✅ VARIANTE B: längere Warmup für sanftere Kraftsteigerung
+warmup-lr-start = 3e-3  # ✅ VARIANTE B: höherer Start als FedProx_4
+warmup-lr-end = 8e-2  # ✅ VARIANTE B: höheres Ende als FedProx_4
 warmup-mu-start = 0.0
-warmup-mu-end = 5e-4  # ✅ VARIANTE A: erhöht
+warmup-mu-end = 1e-3  # ✅ VARIANTE B: 2x höher für stabiles FedProx ramp-up
 
-weight-decay = 1e-4  # ✅ VARIANTE A: 10x höher (stärkere L2-Regularisierung)
+weight-decay = 5e-4  # ✅ VARIANTE B: 5x höher als FedProx_4 (aggressive L2-Regularisierung)
 pos-weight-boost = 1.5
-clip-grad-norm = 5.0
+clip-grad-norm = 4.0
 eval-threshold = 0.35
 run-tag = 1
 
