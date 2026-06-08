@@ -101,9 +101,9 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
     elif [ ${num_clients} -lt 100000 ]; then
         # **BEREICH 4: 10K-65K Clients (Massive FL)** 
         range="Massive"
-        min_fit=$(( num_clients * 6 / 10 ))  # 60% für Training  
-        min_evaluate=$(( num_clients * 8 / 10 ))        # 80% für Evaluation
-        rounds=80
+        min_fit=$(( num_clients * 70 / 100 ))  # 75% für Training (stabil, nicht alle erforderlich)
+        min_evaluate=$(( num_clients * 9 / 10 ))        # 90% für Evaluation
+        rounds=45  # Fewer rounds, better convergence (avoid plateau)
         
     else
         # **BEREICH 5: 100K+ Clients (Federated Edge Learning)**

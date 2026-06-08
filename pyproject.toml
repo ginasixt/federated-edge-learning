@@ -49,7 +49,7 @@ ignore_reinit_error = true
 # Custom config values accessible via `context.run_config`
 [tool.flwr.app.config]
 # Server
-num-server-rounds = 80
+num-server-rounds = 50
 fraction-fit = 0.8  # 80% = 26.214 Clients
 fraction-evaluate = 1.0  # 100% = 32.768 Clients
 min-fit-clients = 9830
@@ -65,23 +65,29 @@ split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
 
 # Client
 batch-size = 256  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
-mu = 1e-3  # ✅ VARIANTE B: 2x höher als FedProx_4 (sehr starke FedProx-Ridge)
-lr = 8e-2  # ✅ VARIANTE B: 1.6x höher als FedProx_4 (noch aggressiveres Lernen)
-lr-after = 3e-2  # ✅ VARIANTE B: 1.5x höher als FedProx_4
-lr-after-round = 60
+mu = 0  #  ist 0 bei FedAdam
+lr = 5e-2   # ✅ VARIANTE B: 1.6x höher als FedProx_4 (noch aggressiveres Lernen)
+lr-after = 2e-2  # ✅ VARIANTE B: 1.5x höher als FedProx_4
+lr-after-round = 40
 
 # Warm-up (stabilisiert frühe Runden bei vielen Clients mit wenig Samples)
-warmup-rounds = 12  # ✅ VARIANTE B: längere Warmup für sanftere Kraftsteigerung
-warmup-lr-start = 3e-3  # ✅ VARIANTE B: höherer Start als FedProx_4
-warmup-lr-end = 8e-2  # ✅ VARIANTE B: höheres Ende als FedProx_4
+warmup-rounds = 9  # ✅ VARIANTE B: längere Warmup für sanftere Kraftsteigerung
+warmup-lr-start = 1e-3   # ✅ VARIANTE B: höherer Start als FedProx_4
+warmup-lr-end = 5e-2   # ✅ VARIANTE B: höheres Ende als FedProx_4
 warmup-mu-start = 0.0
-warmup-mu-end = 1e-3  # ✅ VARIANTE B: 2x höher für stabiles FedProx ramp-up
+warmup-mu-end = 0 # ✅ VARIANTE B: 2x höher für stabiles FedProx ramp-up
 
 weight-decay = 5e-4  # ✅ VARIANTE B: 5x höher als FedProx_4 (aggressive L2-Regularisierung)
 pos-weight-boost = 1.5
 clip-grad-norm = 4.0
 eval-threshold = 0.35
 run-tag = 1
+
+eta = 0.1
+eta-l = 0.1
+beta-1 = 0.9
+beta-2 = 0.99
+tau = 1e-9
 
 # Loss
 use-focal-loss = false

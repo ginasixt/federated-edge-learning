@@ -7,7 +7,7 @@ import numpy as np
 import random
 from pathlib import Path
 from flwr.server import ServerApp, ServerConfig
-from flwr.server.strategy import FedAvg
+from flwr.server.strategy import FedAdam
 from flwr.common import Context, Parameters, FitRes, ndarrays_to_parameters, parameters_to_ndarrays
 from flwr.common.record import ConfigRecord
 from federated_learning.client_app import MLP
@@ -18,13 +18,19 @@ except ImportError:
     from flwr.server import ServerAppComponents
 
 
-class FedAvgWithScreening(FedAvg):
+class FedAdamWithScreening(FedAdam):
     """
-    Custom FedAvg Strategy that:
+    Custom FedAdam Strategy that:
     1. Caches parameters in RAM after aggregation
     2. Tracks metrics with ScreeningPolicy
     3. Saves checkpoints for best rounds
     4. ✅ Only samples clients with actual validation data for evaluation (efficiency!)
+    
+    FedAdam = Federated Adaptive Moment Estimation (optimizer wie Adam, aber für FL)
+    Vorteile gegenüber FedAvg:
+    - Adaptive learning rates pro Parameter
+    - Robuster gegen heterogene Datenverteilungen
+    - Schnellere Konvergenz bei komplexen Problemen
     """
     
     def __init__(
@@ -70,7 +76,7 @@ class FedAvgWithScreening(FedAvg):
     ) -> tuple[Parameters | None, dict[str, any]]:
         """Aggregiere Gewichte und speichere im RAM."""
         
-        # 1) Standard FedAvg Aggregation
+        # 1) Standard FedAdam Aggregation
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(
             server_round, results, failures
         )
@@ -350,22 +356,20 @@ def server_fn(context: Context) -> ServerAppComponents:
     
     def on_evaluate_config_fn(rnd: int) -> dict:
         """
-        ADAPTIVE Evaluation Schedule:
-        - Runden 1-40: Alle 10 Runden (Warmup/Early Training)
-        - Runden 41-65: Alle 5 Runden (Mid Training)
-        - Runden 66+: JEDE Runde (Critical Convergence Phase)
+        ADAPTIVE Evaluation Schedule (Optimiert für schnelle Konvergenz):
+        - Runden 1-34: Alle 5 Runden (Warmup/Early Training, sparsamer evaluieren)
+        - Runden 35+: JEDE Runde (Dense Monitoring um Plateau zu erkennen)
         - Runde 1 & letzte Runde: IMMER evaluieren
         """
         # Erste und letzte Runde IMMER evaluieren
         if rnd == 1 or rnd == total_rounds:
             pass  # Evaluation läuft
-        # Runden 1-70: Alle 10 Runden
-        elif rnd <= 70:
-            if rnd % 10 != 0:
-                return {}  # Skip Evaluation, senden leere Config, also kein threshold grid
+        # Runden 2-34: Alle 5 Runden evaluieren
+        elif rnd < 25:
+            if rnd % 5 != 0:
+                return {}  # Skip Evaluation, senden leere Config
+        # Runden 35+: JEDE Runde evaluieren (dense monitoring)
         
-  
-
         # ✅ Threshold Grid (nur wenn Eval läuft)
         threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65]
         
@@ -613,12 +617,21 @@ def server_fn(context: Context) -> ServerAppComponents:
         keys = set().union(*(m.keys() for _, m in metrics))
         return {k: sum(n * m.get(k, 0.0) for n, m in metrics) / n_sum for k in keys}
     
-    # ✅ Eine saubere Strategy-Klasse
-    strategy = FedAvgWithScreening(
+    # ✅ Erzeuge initiale Parameter aus dem Modell
+    initial_model = MLP(in_dim=model_dim)
+    initial_weights = [
+        v.detach().clone().numpy() 
+        for v in initial_model.state_dict().values()
+    ]
+    initial_parameters = ndarrays_to_parameters(initial_weights)
+    
+    # ✅ FedAdam Strategy mit adaptive Server-Parametern
+    strategy = FedAdamWithScreening(
         checkpoint_dir=checkpoint_dir,
         model_dim=model_dim,
         run_config=rc,
-        # FedAvg-Parameter
+        initial_parameters=initial_parameters,
+        # FedAdam-Parameter (Aggregation & Sampling)
         fraction_fit=float(rc.get("fraction-fit", 0.8)),
         fraction_evaluate=float(rc.get("fraction-evaluate", 1.0)),
         min_fit_clients=int(rc.get("min-fit-clients", 6)), # is the number of clients that are sampled to be trained in each round
@@ -628,6 +641,12 @@ def server_fn(context: Context) -> ServerAppComponents:
         on_evaluate_config_fn=on_evaluate_config_fn,
         evaluate_metrics_aggregation_fn=evaluate_metrics_aggregation_fn,
         fit_metrics_aggregation_fn=fit_metrics_aggregation_fn,
+        # ✅ FedAdam-spezifische Parameter (korrekte Flower-Namen!)
+        eta=float(rc.get("eta", 0.1)),              # Server Learning Rate
+        eta_l=float(rc.get("eta-l", 0.1)),          # Client Learning Rate (optional über Config)
+        beta_1=float(rc.get("beta-1", 0.9)),        # Adam momentum für Gradienten
+        beta_2=float(rc.get("beta-2", 0.99)),       # Adam momentum für quadr. Gradienten
+        tau=float(rc.get("tau", 1e-9)),             # Epsilon für numerische Stabilität
     )
     
     cfg = ServerConfig(num_rounds=int(rc.get("num-server-rounds", 20)))

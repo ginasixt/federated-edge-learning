@@ -77,29 +77,9 @@ class FocalLoss(nn.Module):
         return focal.mean()
 
 
+
+
 # --- Training/Eval-Utilities ---
-def train_one_epoch(model: nn.Module, loader, opt, crit, prox_mu: float, global_params: List[torch.Tensor], clip_norm: float):
-    model.train()
-    for xb, yb in loader:
-        xb, yb = xb.to(DEVICE), yb.to(DEVICE)
-        opt.zero_grad()
-        logits = model(xb)
-        ce = crit(logits, yb)
-
-        prox = 0.0
-        if prox_mu > 0.0:
-            # FedProx: (mu/2) * ||w - w_global||^2
-            prox_term = 0.0
-            for w, w0 in zip(model.parameters(), global_params):
-                prox_term = prox_term + torch.sum((w - w0) ** 2)
-            prox = 0.5 * prox_mu * prox_term
-
-        loss = ce + prox
-        loss.backward()
-        if clip_norm and clip_norm > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_norm)
-        opt.step()
-
 def evaluate_multi_threshold(
     model: nn.Module, 
     loader, 
@@ -376,11 +356,9 @@ class FlowerClient(NumPyClient):
     def fit(self, parameters, config):
         # Sets the model weights and trains the model on the local data
         self.set_parameters(parameters)
-        global_params = [p.clone().to(DEVICE) for p in self.model.parameters()]
 
         lr = float(config.get("lr", self.default_lr))
         epochs = int(config.get("epochs", self.local_epochs))
-        mu = float(config.get("mu", 1e-3))
         wd = float(config.get("weight-decay", 1e-4))
         clip = float(config.get("clip-grad-norm", 5.0))
 
@@ -399,15 +377,8 @@ class FlowerClient(NumPyClient):
                 logits = self.model(xb)
                 ce = self.crit(logits, yb)
 
-                # FedProx-Term
-                prox = 0.0
-                if mu > 0.0:
-                    prox_term = 0.0
-                    for w, w0 in zip(self.model.parameters(), global_params):
-                        prox_term = prox_term + torch.sum((w - w0) ** 2)
-                    prox = 0.5 * mu * prox_term
-
-                loss = ce + prox
+                # ✅ FedAdam: Nur Cross-Entropy Loss (keine FedProx-Regularisierung!)
+                loss = ce
                 loss.backward()
                 if clip and clip > 0:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=clip)
@@ -472,7 +443,7 @@ class FlowerClient(NumPyClient):
     
     def set_parameters(self, parameters):
         keys = list(self.model.state_dict().keys())
-        state = {k: torch.tensor(v) for k, v in zip(keys, parameters)}
+        state = {k: torch.from_numpy(v).float() for k, v in zip(keys, parameters)}
         self.model.load_state_dict(state, strict=True)
 
     # 1.2) After the training is complete, we return the current model weights to the server

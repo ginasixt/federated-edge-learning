@@ -1,0 +1,111 @@
+# =====================================================================
+# For a full TOML configuration guide, check the Flower docs:
+# https://flower.ai/docs/framework/how-to-configure-pyproject-toml.html
+# =====================================================================
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "federated-edge-learning"
+version = "1.0.0"
+description = "Diabetes Prediction with Federated Learning using Flower & PyTorch"
+license = {text = "Apache License (2.0)"}
+dependencies = [
+    "flwr[simulation]>=1.14.0,<2.0",
+    "flwr-datasets[vision]>=0.4.0,<1.0",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "ginasixt"
+
+# Point to your ServerApp and ClientApp objects
+# Format: "<module>:<object>"
+[tool.flwr.app.components]
+serverapp = "federated_learning.server_app:app"
+clientapp = "federated_learning.client_app:app"
+
+
+# ✅ Ray Backend Konfiguration
+[tool.flwr.app.config.ray-init-args]
+# Nutze 350GB RAM (70% von 500GB, Rest für andere User + OS)
+object_store_memory = 375809638400  # 350GB in Bytes
+
+# Nutze 100 CPUs (aggressive Oversubscription!)
+# Jeder Client nutzt nur ~2-3 Sek CPU-Zeit, dann idle
+num_cpus = 100
+
+# Logging
+log_to_driver = false  # ✅ Reduziert Log-Overhead
+ignore_reinit_error = true
+
+
+# Custom config values accessible via `context.run_config`
+[tool.flwr.app.config]
+# Server
+num-server-rounds = 80
+fraction-fit = 0.8  # 80% = 26.214 Clients
+fraction-evaluate = 1.0  # 100% = 32.768 Clients
+min-fit-clients = 9830
+min-available-clients = 16384
+min-evaluate-clients = 16384
+local-epochs = 1
+
+# Datenpfade
+dataset-path = "data/diabetes.csv"
+prepared-parquet = "data/diabetes_normalized.parquet"
+norm-stats-json = "data/norm_stats.json"
+split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
+
+# Client
+batch-size = 256  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
+mu = 0.0  # ✅ FedAdam: Deaktiviert (FedProx nicht mit FedAdam kombinieren!)
+lr = 1e-1   # ✅ FedAdam: Höhere Client-LR (weniger Regularisierung nötig)
+lr-after = 5e-2  # ✅ FedAdam: Später reduzieren
+lr-after-round = 60
+
+# Warm-up (stabilisiert frühe Runden bei vielen Clients mit wenig Samples)
+warmup-rounds = 10  # ✅ FedAdam: Kürzere Warmup (Optimizer ist stabiler)
+warmup-lr-start = 1e-2   # ✅ FedAdam: Höherer Start
+warmup-lr-end = 1e-1   # ✅ FedAdam: Höheres Ende
+warmup-mu-start = 0.0
+warmup-mu-end = 0.0  # ✅ FedAdam: Deaktiviert (no FedProx)
+
+weight-decay = 1e-4  # ✅ FedAdam: Weniger L2-Regularisierung (Optimizer robust)
+pos-weight-boost = 1.5
+clip-grad-norm = 1.0  # ✅ FedAdam: Strengerer Gradient Clipping (stabilere Aggregation)
+eval-threshold = 0.35
+run-tag = 1
+
+# ✅ FedAdam Server Parameter (aggressiveres Setting)
+eta = 0.2            # Server Learning Rate - aggressiver für schnellere Konvergenz
+eta-l = 0.1            # Client Learning Rate (wird durch lr überschrieben falls gesetzt)
+beta-1 = 0.9           # Adam momentum für 1. Moment (Gradienten)
+beta-2 = 0.995          # Adam momentum für 2. Moment (quadratische Gradienten)
+tau = 1e-9             # Epsilon für numerische Stabilität
+
+# Loss
+use-focal-loss = false
+focal-gamma = 1.0
+
+# Default federation to use when running the app
+[tool.flwr.federations]
+default = "local-simulation"
+
+# Local simulation federation with 32768 virtual SuperNodes
+[tool.flwr.federations.local-simulation]
+options.num-supernodes = 16384
+
+# ✅ KRITISCH: Minimale Resource Limits für maximale Parallelität!
+options.backend.client-resources.num-cpus = 0.1  # ✅ 100 CPUs ÷ 0.1 = 1000 Clients parallel!
+options.backend.client-resources.num-gpus = 0.0  # Keine GPUs
+options.backend.client-resources.memory = 104857600  # ✅ 100 MB pro Client (viel Puffer!)
+
+# ✅ Ray Backend Optimierungen
+options.backend.max-workers = 1000  # Erlaube bis zu 1000 parallele Workers
