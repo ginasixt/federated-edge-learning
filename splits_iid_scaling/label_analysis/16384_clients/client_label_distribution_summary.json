@@ -1,0 +1,50 @@
+{
+  "split_path": "splits_iid_scaling/splits_iid_16384_clients.json",
+  "parquet_path": "data/diabetes_normalized.parquet",
+  "stats_path": "data/norm_stats.json",
+  "target_column": "Diabetes_binary",
+  "include_val": false,
+  "train": {
+    "split_name": "train",
+    "clients": 16384,
+    "total_samples": 177575,
+    "total_pos": 24742,
+    "total_neg": 152833,
+    "global_positive_ratio": 0.13933267633394342,
+    "global_negative_ratio": 0.8606673236660566,
+    "samples_per_client": {
+      "mean": 10.83831787109375,
+      "std": 0.368158957650894,
+      "min": 10,
+      "max": 11,
+      "median": 11.0
+    },
+    "positives_per_client": {
+      "mean": 1.5101318359375,
+      "std": 1.1410615098836854,
+      "min": 0,
+      "max": 7,
+      "median": 1.0
+    },
+    "positive_ratio_per_client": {
+      "mean": 0.13932384144176135,
+      "std": 0.10525462278946698,
+      "min": 0.0,
+      "max": 0.7,
+      "median": 0.1,
+      "q10": 0.0,
+      "q90": 0.2727272727272727
+    },
+    "label_entropy_per_client": {
+      "mean": 0.5048515329041172,
+      "std": 0.29429161219457645,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "clients_with_zero_positive": 3183,
+    "clients_with_only_positive": 0,
+    "positive_ratio_gini": 0.41104471958719246,
+    "samples_gini": 0.012505724570054026
+  },
+  "train_rows_file": "result/label_analysis/16384_clients/client_label_distribution_train.csv"
+}
