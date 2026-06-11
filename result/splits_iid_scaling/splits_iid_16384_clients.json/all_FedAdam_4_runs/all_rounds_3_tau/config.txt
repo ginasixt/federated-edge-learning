@@ -1,0 +1,279 @@
+# =====================================================================
+# For a full TOML configuration guide, check the Flower docs:
+# https://flower.ai/docs/framework/how-to-configure-pyproject-toml.html
+# =====================================================================
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "federated-edge-learning"
+version = "1.0.0"
+description = "Diabetes Prediction with Federated Learning using Flower & PyTorch"
+license = {text = "Apache License (2.0)"}
+dependencies = [
+    "flwr[simulation]>=1.14.0,<2.0",
+    "flwr-datasets[vision]>=0.4.0,<1.0",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "ginasixt"
+
+[tool.flwr.app.components]
+serverapp = "federated_learning.server_app:app"
+clientapp = "federated_learning.client_app:app"
+
+
+# ---------------------------------------------------------------------
+# Ray backend configuration
+# ---------------------------------------------------------------------
+[tool.flwr.app.config.ray-init-args]
+
+# Conservative CPU budget for fair sharing and stable scheduling.
+# This does NOT change the number of clients per round.
+# It only limits how many ClientApp actors can run in parallel.
+num_cpus = 32
+
+# Keep object store below aggressive server-wide allocation.
+# 50 GB should be enough for this setup and avoids reserving too much memory.
+object_store_memory = 53687091200
+
+# Reduce log overhead.
+log_to_driver = false
+ignore_reinit_error = true
+
+
+# ---------------------------------------------------------------------
+# Custom config values accessible via context.run_config
+# ---------------------------------------------------------------------
+[tool.flwr.app.config]
+
+# Server
+num-server-rounds = 50
+
+# Keep large client participation per training round.
+# With 16,384 clients, fraction-fit=0.8 samples about 13,107 clients per round.
+fraction-fit = 0.8
+min-fit-clients = 9830
+min-available-clients = 16384
+
+# Evaluation is reduced for stability.
+# Full evaluation with all 16,384 clients every round can be very expensive.
+# If needed for the final run, this can later be increased again.
+min-evaluate-clients = 16384
+local-epochs = 1
+
+# Data paths
+dataset-path = "data/diabetes.csv"
+prepared-parquet = "data/diabetes_normalized.parquet"
+norm-stats-json = "data/norm_stats.json"
+split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
+
+# Client
+# Since most clients have only a few samples, this usually results in one local batch.
+batch-size = 256
+
+mu = 0
+lr = 5e-2
+lr-after = 2e-2
+lr-after-round = 40
+
+# Warm-up
+warmup-rounds = 12
+warmup-lr-start = 1e-3
+warmup-lr-end = 5e-2
+warmup-mu-start = 0.0
+warmup-mu-end = 0
+
+weight-decay = 5e-4
+pos-weight-boost = 1.5
+clip-grad-norm = 4.0
+eval-threshold = 0.35
+run-tag = 1
+
+# FedAdam / FedOpt parameters
+eta = 0.1
+eta-l = 0.1
+beta-1 = 0.9
+beta-2 = 0.99
+tau = 1e-3
+
+# Loss
+use-focal-loss = false
+focal-gamma = 1.0
+
+
+# ---------------------------------------------------------------------
+# Default federation
+# ---------------------------------------------------------------------
+[tool.flwr.federations]
+default = "local-simulation"
+
+
+# ---------------------------------------------------------------------
+# Local simulation federation
+# ---------------------------------------------------------------------
+[tool.flwr.federations.local-simulation]
+
+# Total simulated client population.
+# This remains unchanged.
+options.num-supernodes = 16384
+
+# ---------------------------------------------------------------------
+# Critical: stable parallelism
+# ---------------------------------------------------------------------
+# Each ClientApp actor is scheduled as requiring 1 CPU.
+# With num_cpus=32 above, this results in about 32 clients running in parallel.
+# The selected clients of a round are therefore processed in waves instead of
+# trying to run hundreds or thousands at once.
+options.backend.client-resources.num-cpus = 1.0
+options.backend.client-resources.num-gpus = 0.0
+
+# Explicit worker cap.
+# Keep this aligned with num_cpus for predictable scheduling.
+options.backend.max-workers = 32# =====================================================================
+# For a full TOML configuration guide, check the Flower docs:
+# https://flower.ai/docs/framework/how-to-configure-pyproject-toml.html
+# =====================================================================
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "federated-edge-learning"
+version = "1.0.0"
+description = "Diabetes Prediction with Federated Learning using Flower & PyTorch"
+license = {text = "Apache License (2.0)"}
+dependencies = [
+    "flwr[simulation]>=1.14.0,<2.0",
+    "flwr-datasets[vision]>=0.4.0,<1.0",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "ginasixt"
+
+[tool.flwr.app.components]
+serverapp = "federated_learning.server_app:app"
+clientapp = "federated_learning.client_app:app"
+
+
+# ---------------------------------------------------------------------
+# Ray backend configuration
+# ---------------------------------------------------------------------
+[tool.flwr.app.config.ray-init-args]
+
+# Conservative CPU budget for fair sharing and stable scheduling.
+# This does NOT change the number of clients per round.
+# It only limits how many ClientApp actors can run in parallel.
+num_cpus = 32
+
+# Keep object store below aggressive server-wide allocation.
+# 50 GB should be enough for this setup and avoids reserving too much memory.
+object_store_memory = 53687091200
+
+# Reduce log overhead.
+log_to_driver = false
+ignore_reinit_error = true
+
+
+# ---------------------------------------------------------------------
+# Custom config values accessible via context.run_config
+# ---------------------------------------------------------------------
+[tool.flwr.app.config]
+
+# Server
+num-server-rounds = 50
+
+# Keep large client participation per training round.
+# With 16,384 clients, fraction-fit=0.8 samples about 13,107 clients per round.
+fraction-fit = 0.8
+min-fit-clients = 9830
+min-available-clients = 16384
+
+# Evaluation is reduced for stability.
+# Full evaluation with all 16,384 clients every round can be very expensive.
+# If needed for the final run, this can later be increased again.
+min-evaluate-clients = 16384
+local-epochs = 1
+
+# Data paths
+dataset-path = "data/diabetes.csv"
+prepared-parquet = "data/diabetes_normalized.parquet"
+norm-stats-json = "data/norm_stats.json"
+split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
+
+# Client
+# Since most clients have only a few samples, this usually results in one local batch.
+batch-size = 256
+
+mu = 0
+lr = 5e-2
+lr-after = 2e-2
+lr-after-round = 40
+
+# Warm-up
+warmup-rounds = 12
+warmup-lr-start = 1e-3
+warmup-lr-end = 5e-2
+warmup-mu-start = 0.0
+warmup-mu-end = 0
+
+weight-decay = 5e-4
+pos-weight-boost = 1.5
+clip-grad-norm = 4.0
+eval-threshold = 0.35
+run-tag = 1
+
+# FedAdam / FedOpt parameters
+eta = 0.1
+eta-l = 0.1
+beta-1 = 0.9
+beta-2 = 0.99
+tau = 1e-3
+
+# Loss
+use-focal-loss = false
+focal-gamma = 1.0
+
+
+# ---------------------------------------------------------------------
+# Default federation
+# ---------------------------------------------------------------------
+[tool.flwr.federations]
+default = "local-simulation"
+
+
+# ---------------------------------------------------------------------
+# Local simulation federation
+# ---------------------------------------------------------------------
+[tool.flwr.federations.local-simulation]
+
+# Total simulated client population.
+# This remains unchanged.
+options.num-supernodes = 16384
+
+# ---------------------------------------------------------------------
+# Critical: stable parallelism
+# ---------------------------------------------------------------------
+# Each ClientApp actor is scheduled as requiring 1 CPU.
+# With num_cpus=32 above, this results in about 32 clients running in parallel.
+# The selected clients of a round are therefore processed in waves instead of
+# trying to run hundreds or thousands at once.
+options.backend.client-resources.num-cpus = 1.0
+options.backend.client-resources.num-gpus = 0.0
+
+# Explicit worker cap.
+# Keep this aligned with num_cpus for predictable scheduling.
+options.backend.max-workers = 32
