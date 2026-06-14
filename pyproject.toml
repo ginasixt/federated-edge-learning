@@ -25,86 +25,116 @@ packages = ["."]
 [tool.flwr.app]
 publisher = "ginasixt"
 
-# Point to your ServerApp and ClientApp objects
-# Format: "<module>:<object>"
 [tool.flwr.app.components]
 serverapp = "federated_learning.server_app:app"
 clientapp = "federated_learning.client_app:app"
 
 
-# ✅ Ray Backend Konfiguration
+# ---------------------------------------------------------------------
+# Ray backend configuration
+# ---------------------------------------------------------------------
 [tool.flwr.app.config.ray-init-args]
-# Nutze 350GB RAM (70% von 500GB, Rest für andere User + OS)
-object_store_memory = 375809638400  # 350GB in Bytes
 
-# Nutze 100 CPUs (aggressive Oversubscription!)
-# Jeder Client nutzt nur ~2-3 Sek CPU-Zeit, dann idle
-num_cpus = 100
+# Conservative CPU budget for fair sharing and stable scheduling.
+# This does NOT change the number of clients per round.
+# It only limits how many ClientApp actors can run in parallel.
+num_cpus = 32
 
-# Logging
-log_to_driver = false  # ✅ Reduziert Log-Overhead
+# Keep object store below aggressive server-wide allocation.
+# 50 GB should be enough for this setup and avoids reserving too much memory.
+object_store_memory = 53687091200
+
+# Reduce log overhead.
+log_to_driver = false
 ignore_reinit_error = true
 
 
-# Custom config values accessible via `context.run_config`
+# ---------------------------------------------------------------------
+# Custom config values accessible via context.run_config
+# ---------------------------------------------------------------------
 [tool.flwr.app.config]
+
 # Server
 num-server-rounds = 50
-fraction-fit = 0.8  # 80% = 26.214 Clients
-fraction-evaluate = 1.0  # 100% = 32.768 Clients
+
+# Keep large client participation per training round.
+# With 16,384 clients, fraction-fit=0.8 samples about 13,107 clients per round.
+fraction-fit = 0.8
 min-fit-clients = 9830
 min-available-clients = 16384
+
+# Evaluation is reduced for stability.
+# Full evaluation with all 16,384 clients every round can be very expensive.
+# If needed for the final run, this can later be increased again.
 min-evaluate-clients = 16384
 local-epochs = 1
 
-# Datenpfade
+# Data paths
 dataset-path = "data/diabetes.csv"
 prepared-parquet = "data/diabetes_normalized.parquet"
 norm-stats-json = "data/norm_stats.json"
 split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
 
 # Client
-batch-size = 256  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
-mu = 0  #  ist 0 bei FedAdam
-lr = 5e-2   # ✅ VARIANTE B: 1.6x höher als FedProx_4 (noch aggressiveres Lernen)
-lr-after = 2e-2  # ✅ VARIANTE B: 1.5x höher als FedProx_4
+# Since most clients have only a few samples, this usually results in one local batch.
+batch-size = 256
+
+mu = 0
+lr = 5e-2
+lr-after = 2e-2
 lr-after-round = 40
 
-# Warm-up (stabilisiert frühe Runden bei vielen Clients mit wenig Samples)
-warmup-rounds = 9  # ✅ VARIANTE B: längere Warmup für sanftere Kraftsteigerung
-warmup-lr-start = 1e-3   # ✅ VARIANTE B: höherer Start als FedProx_4
-warmup-lr-end = 5e-2   # ✅ VARIANTE B: höheres Ende als FedProx_4
+# Warm-up
+warmup-rounds = 12
+warmup-lr-start = 1e-3
+warmup-lr-end = 5e-2
 warmup-mu-start = 0.0
-warmup-mu-end = 0 # ✅ VARIANTE B: 2x höher für stabiles FedProx ramp-up
+warmup-mu-end = 0
 
-weight-decay = 5e-4  # ✅ VARIANTE B: 5x höher als FedProx_4 (aggressive L2-Regularisierung)
+weight-decay = 5e-4
 pos-weight-boost = 1.5
 clip-grad-norm = 4.0
 eval-threshold = 0.35
 run-tag = 1
 
+# FedAdam / FedOpt parameters
 eta = 0.1
 eta-l = 0.1
 beta-1 = 0.9
 beta-2 = 0.99
-tau = 1e-9
+tau = 1e-3
 
 # Loss
 use-focal-loss = false
 focal-gamma = 1.0
 
-# Default federation to use when running the app
+
+# ---------------------------------------------------------------------
+# Default federation
+# ---------------------------------------------------------------------
 [tool.flwr.federations]
 default = "local-simulation"
 
-# Local simulation federation with 32768 virtual SuperNodes
+
+# ---------------------------------------------------------------------
+# Local simulation federation
+# ---------------------------------------------------------------------
 [tool.flwr.federations.local-simulation]
+
+# Total simulated client population.
+# This remains unchanged.
 options.num-supernodes = 16384
 
-# ✅ KRITISCH: Minimale Resource Limits für maximale Parallelität!
-options.backend.client-resources.num-cpus = 0.1  # ✅ 100 CPUs ÷ 0.1 = 1000 Clients parallel!
-options.backend.client-resources.num-gpus = 0.0  # Keine GPUs
-options.backend.client-resources.memory = 104857600  # ✅ 100 MB pro Client (viel Puffer!)
+# ---------------------------------------------------------------------
+# Critical: stable parallelism
+# ---------------------------------------------------------------------
+# Each ClientApp actor is scheduled as requiring 1 CPU.
+# With num_cpus=32 above, this results in about 32 clients running in parallel.
+# The selected clients of a round are therefore processed in waves instead of
+# trying to run hundreds or thousands at once.
+options.backend.client-resources.num-cpus = 1.0
+options.backend.client-resources.num-gpus = 0.0
 
-# ✅ Ray Backend Optimierungen
-options.backend.max-workers = 1000  # Erlaube bis zu 1000 parallele Workers
+# Explicit worker cap.
+# Keep this aligned with num_cpus for predictable scheduling.
+options.backend.max-workers = 32

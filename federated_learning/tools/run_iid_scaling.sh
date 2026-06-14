@@ -25,6 +25,11 @@ fi
 
 # Cleanup-Funktion
 cleanup() {
+    if [ "${CLEANUP_DONE:-0}" -eq 1 ]; then
+        return
+    fi
+    CLEANUP_DONE=1
+
     echo ""
     echo "🔄 Restoring original pyproject.toml..."
     cp pyproject.toml.backup pyproject.toml
@@ -37,6 +42,7 @@ cleanup() {
 
 # Cleanup bei Script-Ende (auch bei Fehlern oder Ctrl+C)
 trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
 
 # Funktion: Update nur options.num-supernodes in TOML
 update_supernodes() {

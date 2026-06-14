@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 from typing import List, Dict, Tuple
-import os  # ✅ NEU
 
 import numpy as np
 import torch
@@ -16,19 +15,7 @@ from flwr.common import Context
 
 from federated_learning.task import load_client_data, make_loaders_from_arrays
 
-# ✅ FAIR SHARING: 50% Server-Ressourcen (250 GB RAM, 56 CPU-Kerne)
-# ⚠️ WICHTIG: MUSS VOR Ray-Import gesetzt werden!
-os.environ.setdefault("RAY_memory_monitor_refresh_ms", "1000")  # Check alle 1s
-os.environ.setdefault("RAY_memory_usage_threshold", "0.50")  # Max 50% Server-RAM (250 GB)
-os.environ.setdefault("RAY_object_spilling_threshold", "0.92")  # Erst bei 92% spillen (230 GB)
-
-# CPU-Limit: 56 von 112 Kernen
-os.environ.setdefault("RAY_CPU_LIMIT", "84")
-
-# ✅ Dedup Logs (verhindert Log-Spam bei 56 parallelen Clients)
-os.environ.setdefault("RAY_DEDUP_LOGS", "1")
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cpu")
 
 
 # define a simple MLP model for Classification
@@ -304,9 +291,7 @@ class FlowerClient(NumPyClient):
         # ✅ Val ist optional: Manche Clients haben keine Val-Daten
         client_val_idx = val_mapping.get(self.cid, [])
 
-        print(f"[Client {self.cid}] Data split:")
-        print(f"   Train:      {len(client_train_idx)} samples (client-local)")
-        print(f"   Validation: {len(client_val_idx)} samples (client-local)")
+        print(f"[Client {self.cid}] Data split: Train:{len(client_train_idx)}, Validation: {len(client_val_idx)} ")
         
         # 3. Lade Daten + Class-Weights (global berechnet, nicht für echtes FEL scenario :( ), hab ich jetzt schon vorher in normalice and add weights angewand, könnte man nochmal umschrieben.
         boost_factor = float(rc.get("pos-weight-boost", 2.0))

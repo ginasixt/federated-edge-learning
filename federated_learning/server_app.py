@@ -149,7 +149,7 @@ class FedAdamWithScreening(FedAdam):
         
         # ✅ 3) Check: Alle n_val=0?
         if not valid_results:
-            print(f"⏭️  Round {server_round}: Evaluation skipped (all n_val=0)")
+            print(f"⏭Round {server_round}: Evaluation skipped")
             return None, {}
         
         # ✅ 4) Standard Aggregation 
@@ -217,7 +217,7 @@ class FedAdamWithScreening(FedAdam):
         state_dict_keys = list(self.template_model.state_dict().keys())
         
         if len(ndarrays) != len(state_dict_keys):
-            print(f"⚠️  Parameter count mismatch! "
+            print(f"Parameter count mismatch! "
                   f"Expected {len(state_dict_keys)}, got {len(ndarrays)}")
             return
         
@@ -228,7 +228,7 @@ class FedAdamWithScreening(FedAdam):
         
         # Speichere auf Disk
         torch.save(state_dict, checkpoint_path)
-        print(f"   💾 Checkpoint saved: {checkpoint_path}")
+        print(f"Checkpoint saved: {checkpoint_path}")
 
 
 # flwr run lädt über pyproject.toml serverapp = "…server_app:app".
@@ -364,8 +364,8 @@ def server_fn(context: Context) -> ServerAppComponents:
         # Erste und letzte Runde IMMER evaluieren
         if rnd == 1 or rnd == total_rounds:
             pass  # Evaluation läuft
-        # Runden 2-34: Alle 5 Runden evaluieren
-        elif rnd < 25:
+        # Runden 2-20: Alle 5 Runden evaluieren
+        elif rnd < 15:
             if rnd % 5 != 0:
                 return {}  # Skip Evaluation, senden leere Config
         # Runden 35+: JEDE Runde evaluieren (dense monitoring)
