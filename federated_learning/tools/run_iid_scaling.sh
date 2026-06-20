@@ -8,7 +8,7 @@ set -euo pipefail
 
 # IID Scaling: 2 → 177575 Clients (18 Datensätze)
 CLIENT_COUNTS=(16384)
-RUNS_PER_SPLIT=1
+RUNS_PER_SPLIT=2
 
 echo "📊 IID SCALING EXPERIMENTS (18 Configurations)"
 echo "═══════════════════════════════════════"
@@ -101,7 +101,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
     elif [ ${num_clients} -lt 100000 ]; then
         # **BEREICH 4: 10K-65K Clients (Massive FL)** 
         range="Massive"
-        min_fit=$(( num_clients * 6 / 10 ))  # 60% für Training  
+        min_fit=$(( num_clients * 7 / 10 ))  # 60% für Training  
         min_evaluate=$(( num_clients * 8 / 10 ))        # 80% für Evaluation
         rounds=80
         

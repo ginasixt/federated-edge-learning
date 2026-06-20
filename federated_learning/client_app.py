@@ -16,19 +16,7 @@ from flwr.common import Context
 
 from federated_learning.task import load_client_data, make_loaders_from_arrays
 
-# ✅ FAIR SHARING: 50% Server-Ressourcen (250 GB RAM, 56 CPU-Kerne)
-# ⚠️ WICHTIG: MUSS VOR Ray-Import gesetzt werden!
-os.environ.setdefault("RAY_memory_monitor_refresh_ms", "1000")  # Check alle 1s
-os.environ.setdefault("RAY_memory_usage_threshold", "0.50")  # Max 50% Server-RAM (250 GB)
-os.environ.setdefault("RAY_object_spilling_threshold", "0.92")  # Erst bei 92% spillen (230 GB)
-
-# CPU-Limit: 56 von 112 Kernen
-os.environ.setdefault("RAY_CPU_LIMIT", "84")
-
-# ✅ Dedup Logs (verhindert Log-Spam bei 56 parallelen Clients)
-os.environ.setdefault("RAY_DEDUP_LOGS", "1")
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cpu")
 
 
 # define a simple MLP model for Classification
