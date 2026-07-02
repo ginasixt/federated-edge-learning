@@ -59,16 +59,16 @@ ignore_reinit_error = true
 num-server-rounds = 80
 fraction-fit = 0.8  # 80% = 26.214 Clients
 fraction-evaluate = 1.0  # 100% = 32.768 Clients
-min-fit-clients = 9830
-min-available-clients = 16384
-min-evaluate-clients = 16384
+min-fit-clients = 2500
+min-available-clients = 4096
+min-evaluate-clients = 4096
 local-epochs = 1
 
 # Datenpfade
 dataset-path = "data/diabetes.csv"
 prepared-parquet = "data/diabetes_normalized.parquet"
 norm-stats-json = "data/norm_stats.json"
-split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
+split-path = "splits_iid_scaling/splits_iid_4096_clients.json"
 
 # Client
 batch-size = 256  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
@@ -109,7 +109,7 @@ default = "local-simulation"
 
 # Total simulated client population.
 # This remains unchanged.
-options.num-supernodes = 16384
+options.num-supernodes = 4096
 
 # ---------------------------------------------------------------------
 # Critical: stable parallelism
