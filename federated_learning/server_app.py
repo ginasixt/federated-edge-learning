@@ -80,6 +80,11 @@ class FedAvgWithScreening(FedAvg):
         
         # 2) Speichere im RAM
         self.parameters_cache[server_round] = aggregated_parameters
+
+        run_tag = str(self.run_config.get("run-tag", "1"))
+        checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}_run_{run_tag}.pt"
+        self._save_checkpoint(server_round, aggregated_parameters, checkpoint_path)
+        print(f" Round {server_round}: Saved model checkpoint after fit", flush=True)
         
         # 3) Cleanup: Behalte nur die letzten 3 Runden im RAM
         if len(self.parameters_cache) > 3:
@@ -88,6 +93,7 @@ class FedAvgWithScreening(FedAvg):
         
         return aggregated_parameters, aggregated_metrics
     
+    # word nicht aufgerufen 
     def select_for_evaluate(self, server_round: int, available_clients, num_to_select: int):
         """
         ✅ OPTIMIZATION: Nur Val-Clients evaluieren!
@@ -154,12 +160,9 @@ class FedAvgWithScreening(FedAvg):
         
         # ✅ 5) Speichere JEDE evaluierte Runde (für Post-Training Screening)
         if server_round in self.parameters_cache:
-            # Speichere Checkpoint
-            checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}.pt"
-            self._save_checkpoint(server_round, self.parameters_cache[server_round], checkpoint_path)
-            
             # Speichere Metriken als JSON
             run_tag = str(self.run_config.get("run-tag", "1"))
+            checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}_run_{run_tag}.pt"
             json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
             
             metrics_with_meta = {
@@ -359,12 +362,20 @@ def server_fn(context: Context) -> ServerAppComponents:
         # Erste und letzte Runde IMMER evaluieren
         if rnd == 1 or rnd == total_rounds:
             pass  # Evaluation läuft
-        # Runden 1-70: Alle 10 Runden
-        elif rnd <= 70:
-            if rnd % 10 != 0:
-                return {}  # Skip Evaluation, senden leere Config, also kein threshold grid
-        
-  
+
+        # Ab Runde 50: jede Runde evaluieren
+        elif rnd >= 50:
+            pass  # Evaluation läuft
+
+        # Runde 40 bis 50: alle 5 Runden evaluieren
+        else:
+            if rnd % 5 != 0:
+                return {}  # Skip Evaluation, kein threshold grid
+
+        # # Vor Runde 40: alle 10 Runden evaluieren
+        # else:
+        #     if rnd % 10 != 0:
+        #         return {}  # Skip Evaluation, kein threshold grid
 
         # ✅ Threshold Grid (nur wenn Eval läuft)
         threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65]
