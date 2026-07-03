@@ -357,3 +357,57 @@ SCALING: 8192 Clients
 ✅ Original pyproject.toml restored
 2026-07-03 09:56:13,537	INFO scripts.py:1332 -- Did not find any active Ray processes.
 ✅ Ray tmp cleaned
+📊 IID SCALING EXPERIMENTS (18 Configurations)
+═══════════════════════════════════════
+Client counts: 8192
+Total Training Samples: 177575 (constant)
+Runs per split: 1
+
+
+════════════════════════════════════════════════════════════════════════════════
+SCALING: 8192 Clients
+   📝 Updated options.num-supernodes = 8192 in pyproject.toml
+   Samples/Client: ~21
+════════════════════════════════════════════════════════════════════════════════
+📋 Configuration:
+   Range: Large-Scale
+   options.num-supernodes: 8192 (updated in TOML)
+   split-path: splits_iid_scaling/splits_iid_8192_clients.json
+   min-fit-clients: 6144 (75% participation)
+   min-available-clients: 8192
+   min-evaluate-clients: 6553
+   rounds: 80
+   expected-samples/round: 129024
+
+[1/1] 🚀 Experiment 1/1
+   ✅ SUCCESS in 33644s (80 rounds)
+2026-07-03 22:37:51,193	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   📊 Saved: results/iid_scaling/8192_clients_run_1.json
+
+📊 8192 Clients: 1/1 successful
+
+════════════════════════════════════════════════════════════════════════════════
+🎉 IID SCALING ANALYSIS COMPLETED
+════════════════════════════════════════════════════════════════════════════════
+📈 Summary:
+   Total experiments: 1
+   Successful: 4
+   Success rate: 400%
+
+📊 Results by Scaling Range:
+   Cross-Silo: 0 results
+   Mid-Scale: 0 results
+   Large-Scale: 3 results
+   Massive: 1 results
+   FEL: 0 results
+
+📁 Output Locations:
+   Results: results/iid_scaling/*.json
+   Logs: logs/iid_scaling/*.log
+
+🔄 pyproject.toml will be restored to original state on exit
+
+🔄 Restoring original pyproject.toml...
+✅ Original pyproject.toml restored
+2026-07-03 22:37:52,073	INFO scripts.py:1332 -- Did not find any active Ray processes.
+✅ Ray tmp cleaned
