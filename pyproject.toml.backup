@@ -53,20 +53,20 @@ ignore_reinit_error = true
 # Custom config values accessible via `context.run_config`
 [tool.flwr.app.config]
 # Server
-num-server-rounds = 75
+num-server-rounds = 80
 fraction-fit = 0.5  # 80% = 26.214 Clients
 
 fraction-evaluate = 1.0
-min-fit-clients = 8191
-min-available-clients = 16384
-min-evaluate-clients = 16384
+min-fit-clients = 5000
+min-available-clients = 8192
+min-evaluate-clients = 8192
 local-epochs = 2
 
 # Datenpfade
 dataset-path = "data/diabetes.csv"
 prepared-parquet = "data/diabetes_normalized.parquet"
 norm-stats-json = "data/norm_stats.json"
-split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
+split-path = "splits_iid_scaling/splits_iid_8192_clients.json"
 
 # Client
 batch-size = 128  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
@@ -97,7 +97,7 @@ default = "local-simulation"
 
 # Total simulated client population.
 # This remains unchanged.
-options.num-supernodes = 16384
+options.num-supernodes = 8192
 
 # ---------------------------------------------------------------------
 # Critical: stable parallelism
