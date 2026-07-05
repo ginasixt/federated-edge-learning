@@ -98,10 +98,14 @@ class ScaffoldFedAvg(FedAvg):
         # (Currently a no-op since η_g = 1, but explicit for clarity)
         # global_lr = 1.0  → no scaling needed
 
-        # ── 2) Cache aggregated parameters for checkpoint saving ───────────
-        self.parameters_cache[server_round] = aggregated_parameters
-        if len(self.parameters_cache) > 3:
-            del self.parameters_cache[min(self.parameters_cache)]
+        # # ── 2) Cache aggregated parameters for checkpoint saving ───────────
+        # self.parameters_cache[server_round] = aggregated_parameters
+        # if len(self.parameters_cache) > 3:
+        #     del self.parameters_cache[min(self.parameters_cache)]
+
+        run_tag = str(self.run_config.get("run-tag", "1"))
+        checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}_run_{run_tag}.pt"
+        self._save_checkpoint(server_round, aggregated_parameters, checkpoint_path)
 
         # ── 3) Lazy-init global control variate ───────────────────────────
         if self.c_global is None:
@@ -171,20 +175,15 @@ class ScaffoldFedAvg(FedAvg):
         if not metrics:
             return loss, {}
 
-        if server_round in self.parameters_cache:
-            checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}.pt"
-            self._save_checkpoint(server_round, self.parameters_cache[server_round], checkpoint_path)
+        run_tag   = str(self.run_config.get("run-tag", "1"))
+        json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
 
-            run_tag   = str(self.run_config.get("run-tag", "1"))
-            json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
-
-            with open(json_path, "w") as f:
-                json.dump(
-                    {"round": server_round, "metrics": metrics,
-                     "model_checkpoint": str(checkpoint_path)},
-                    f, indent=2,
-                )
-            print(f"💾 Round {server_round}: Saved {checkpoint_path.name} + {json_path.name}")
+        with open(json_path, "w") as f:
+            json.dump(
+                {"round": server_round, "metrics": metrics, "loss": loss},
+                f, indent=2,
+            )
+        print(f"💾 Round {server_round}: Saved {json_path.name}")
 
         return loss, metrics
 
