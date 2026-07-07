@@ -50,9 +50,6 @@ class FedAdamWithScreening(FedAdam):
         # Template für State Dict Keys
         self.template_model = MLP(in_dim=model_dim)
         
-        # RAM-Cache: {server_round: Parameters}
-        self.parameters_cache: dict[int, Parameters] = {}
-        
         # ✅ Lade Val-Client-Range aus Split Meta für effiziente Evaluation
         split_path = run_config.get("split-path")
         self.val_client_range = None
@@ -74,7 +71,7 @@ class FedAdamWithScreening(FedAdam):
         results: list[tuple[any, FitRes]],
         failures: list[tuple[any, FitRes] | BaseException],
     ) -> tuple[Parameters | None, dict[str, any]]:
-        """Aggregiere Gewichte und speichere im RAM."""
+        """Aggregiere Gewichte und speichere den Checkpoint direkt auf Disk."""
         
         # 1) Standard FedAdam Aggregation
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(
@@ -84,13 +81,10 @@ class FedAdamWithScreening(FedAdam):
         if aggregated_parameters is None:
             return None, {}
         
-        # 2) Speichere im RAM
-        self.parameters_cache[server_round] = aggregated_parameters
-        
-        # 3) Cleanup: Behalte nur die letzten 3 Runden im RAM
-        if len(self.parameters_cache) > 3:
-            oldest = min(self.parameters_cache.keys())
-            del self.parameters_cache[oldest]
+        # 2) Speichere das aggregierte Modell direkt als Checkpoint auf Disk
+        run_tag = str(self.run_config.get("run-tag", "1"))
+        checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}_run_{run_tag}.pt"
+        self._save_checkpoint(server_round, aggregated_parameters, checkpoint_path)
         
         return aggregated_parameters, aggregated_metrics
     
@@ -158,42 +152,40 @@ class FedAdamWithScreening(FedAdam):
         if not metrics:
             return loss, {}
         
-        # ✅ 5) Speichere JEDE evaluierte Runde (für Post-Training Screening)
-        if server_round in self.parameters_cache:
-            # Speichere Checkpoint
-            checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}.pt"
-            self._save_checkpoint(server_round, self.parameters_cache[server_round], checkpoint_path)
-            
-            # Speichere Metriken als JSON
-            run_tag = str(self.run_config.get("run-tag", "1"))
-            json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
-            
+        # 5) Speichere Metriken als JSON und verknüpfe den bereits gespeicherten Checkpoint
+        run_tag = str(self.run_config.get("run-tag", "1"))
+        checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}_run_{run_tag}.pt"
+        json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
+        
+        if checkpoint_path.exists():
             metrics_with_meta = {
                 "round": server_round,
                 "metrics": metrics,
                 "model_checkpoint": str(checkpoint_path)
             }
-            
+
             with open(json_path, "w") as f:
                 json.dump(metrics_with_meta, f, indent=2)
-            
+
             print(f"💾 Round {server_round}: Saved {checkpoint_path.name} + {json_path.name}")
-            
-            # 6) OPTIONAL: Generiere Calibration & Risk Distribution Plots
-            # try:
-            #     from federated_learning.plotting.calibration_and_risk_plots import generate_both_plots
-                
-            #     plots_dir = self.checkpoint_dir / "plots"
-            #     generate_both_plots(
-            #         metrics,
-            #         output_dir=plots_dir,
-            #         round_num=server_round,
-            #         show=False  # Nicht im Background anzeigen
-            #     )
-            # except ImportError:
-            #     pass  # Plots sind optional
-            # except Exception as e:
-            #     print(f"⚠️  Plot generation failed: {e}")
+        else:
+            print(f"⚠️  Round {server_round}: Checkpoint missing at evaluation time: {checkpoint_path}")
+
+        # 6) OPTIONAL: Generiere Calibration & Risk Distribution Plots
+        # try:
+        #     from federated_learning.plotting.calibration_and_risk_plots import generate_both_plots
+        #     
+        #     plots_dir = self.checkpoint_dir / "plots"
+        #     generate_both_plots(
+        #         metrics,
+        #         output_dir=plots_dir,
+        #         round_num=server_round,
+        #         show=False  # Nicht im Background anzeigen
+        #     )
+        # except ImportError:
+        #     pass  # Plots sind optional
+        # except Exception as e:
+        #     print(f"⚠️  Plot generation failed: {e}")
         
         return loss, metrics
     
