@@ -1,0 +1,72 @@
+
+════════════════════════════════════════════════════════════════════════════════
+SCALING: 4096 Clients
+   📝 Updated options.num-supernodes = 4096 in pyproject.toml
+   Samples/Client: ~43
+════════════════════════════════════════════════════════════════════════════════
+📋 Configuration:
+   Range: Large-Scale
+   options.num-supernodes: 4096 (updated in TOML)
+   split-path: splits_iid_scaling/splits_iid_4096_clients.json
+   min-fit-clients: 2867 (69% participation)
+   min-available-clients: 4096
+   min-evaluate-clients: 3686
+   rounds: 45
+   expected-samples/round: 123281
+
+[1/5] 🚀 Experiment 1/5
+   ✅ SUCCESS in 6582s (45 rounds)
+2026-07-06 17:44:22,420	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   📊 Saved: results/iid_scaling/4096_clients_run_1.json
+   ⏳ Waiting 3s...
+2026-07-06 17:44:23,165	INFO scripts.py:1332 -- Did not find any active Ray processes.
+
+[2/5] 🚀 Experiment 2/5
+   ✅ SUCCESS in 6579s (45 rounds)
+2026-07-06 19:34:06,628	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+2026-07-06 19:34:07,375	INFO scripts.py:1332 -- Did not find any active Ray processes.
+
+[3/5] 🚀 Experiment 3/5
+   ✅ SUCCESS in 6538s (45 rounds)
+2026-07-06 21:23:09,077	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+2026-07-06 21:23:09,825	INFO scripts.py:1332 -- Did not find any active Ray processes.
+
+[4/5] 🚀 Experiment 4/5
+   ✅ SUCCESS in 6554s (45 rounds)
+2026-07-06 23:12:27,395	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+2026-07-06 23:12:28,137	INFO scripts.py:1332 -- Did not find any active Ray processes.
+
+[5/5] 🚀 Experiment 5/5
+   ✅ SUCCESS in 6588s (45 rounds)
+2026-07-07 01:02:20,068	INFO scripts.py:1332 -- Did not find any active Ray processes.
+
+📊 4096 Clients: 5/5 successful
+
+════════════════════════════════════════════════════════════════════════════════
+🎉 IID SCALING ANALYSIS COMPLETED
+════════════════════════════════════════════════════════════════════════════════
+📈 Summary:
+   Total experiments: 5
+   Successful: 5
+   Success rate: 100%
+
+📊 Results by Scaling Range:
+   Cross-Silo: 0 results
+   Mid-Scale: 0 results
+   Large-Scale: 4 results
+   Massive: 1 results
+   FEL: 0 results
+
+📁 Output Locations:
+   Results: results/iid_scaling/*.json
+   Logs: logs/iid_scaling/*.log
+
+🔄 pyproject.toml will be restored to original state on exit
+
+🔄 Restoring original pyproject.toml...
+✅ Original pyproject.toml restored
+2026-07-07 01:02:20,843	INFO scripts.py:1332 -- Did not find any active Ray processes.
+✅ Ray tmp cleaned
