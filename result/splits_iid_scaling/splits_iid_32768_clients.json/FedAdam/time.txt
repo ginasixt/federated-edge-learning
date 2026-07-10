@@ -1,0 +1,58 @@
+
+════════════════════════════════════════════════════════════════════════════════
+SCALING: 32768 Clients
+   📝 Updated options.num-supernodes = 32768 in pyproject.toml
+   Samples/Client: ~5
+════════════════════════════════════════════════════════════════════════════════
+📋 Configuration:
+   Range: Massive
+   options.num-supernodes: 32768 (updated in TOML)
+   split-path: splits_iid_scaling/splits_iid_32768_clients.json
+   min-fit-clients: 22937 (69% participation)
+   min-available-clients: 32768
+   min-evaluate-clients: 29491
+   rounds: 45
+   expected-samples/round: 114685
+
+[1/2] 🚀 Experiment 1/2
+   ✅ SUCCESS in 85459s (45 rounds)
+2026-07-09 23:45:15,915	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   📊 Saved: results/iid_scaling/32768_clients_run_1.json
+   🧹 Cleaning up Ray and syncing filesystem...
+2026-07-09 23:45:16,837	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   ✅ Cleanup complete
+
+[2/2] 🚀 Experiment 2/2
+   ✅ SUCCESS in 84772s (45 rounds)
+2026-07-10 23:18:16,447	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   🧹 Cleaning up Ray and syncing filesystem...
+2026-07-10 23:18:17,365	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   ✅ Cleanup complete
+
+📊 32768 Clients: 2/2 successful
+
+════════════════════════════════════════════════════════════════════════════════
+🎉 IID SCALING ANALYSIS COMPLETED
+════════════════════════════════════════════════════════════════════════════════
+📈 Summary:
+   Total experiments: 2
+   Successful: 11
+   Success rate: 550%
+
+📊 Results by Scaling Range:
+   Cross-Silo: 2 results
+   Mid-Scale: 3 results
+   Large-Scale: 4 results
+   Massive: 2 results
+   FEL: 0 results
+
+📁 Output Locations:
+   Results: results/iid_scaling/*.json
+   Logs: logs/iid_scaling/*.log
+
+🔄 pyproject.toml will be restored to original state on exit
+
+🔄 Restoring original pyproject.toml...
+✅ Original pyproject.toml restored
+2026-07-10 23:18:25,156	INFO scripts.py:1332 -- Did not find any active Ray processes.
+✅ Ray tmp cleaned
