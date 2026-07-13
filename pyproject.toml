@@ -60,24 +60,24 @@ num-server-rounds = 50
 # Keep large client participation per training round.
 # With 16,384 clients, fraction-fit=0.8 samples about 13,107 clients per round.
 fraction-fit = 0.8
-min-fit-clients = 4000
-min-available-clients = 4096
+min-fit-clients = 10
+min-available-clients = 16
 
 # Evaluation is reduced for stability.
 # Full evaluation with all 16,384 clients every round can be very expensive.
 # If needed for the final run, this can later be increased again.
-min-evaluate-clients = 4096
+min-evaluate-clients = 16
 local-epochs = 1
 
 # Data paths
 dataset-path = "data/diabetes.csv"
 prepared-parquet = "data/diabetes_normalized.parquet"
 norm-stats-json = "data/norm_stats.json"
-split-path = "splits_iid_scaling/splits_iid_4096_clients.json"
+split-path = "splits_iid_scaling/splits_iid_16_clients.json"
 
 # Client
 # Since most clients have only a few samples, this usually results in one local batch.
-batch-size = 256
+batch-size = 16
 
 mu = 0
 lr = 5e-2
@@ -123,13 +123,13 @@ default = "local-simulation"
 
 # Total simulated client population.
 # This remains unchanged.
-options.num-supernodes = 4096
+options.num-supernodes = 16
 
 # ---------------------------------------------------------------------
 # Critical: stable parallelism
 # ---------------------------------------------------------------------
 # Each ClientApp actor is scheduled as requiring 1 CPU.
-# With num_cpus=32 above, this results in about 32 clients running in parallel.
+# With num_cpus=16 above, this results in about 16 clients running in parallel.
 # The selected clients of a round are therefore processed in waves instead of
 # trying to run hundreds or thousands at once.
 options.backend.client-resources.num-cpus = 1.0
@@ -137,4 +137,4 @@ options.backend.client-resources.num-gpus = 0.0
 
 # Explicit worker cap.
 # Keep this aligned with num_cpus for predictable scheduling.
-options.backend.max-workers = 32
+options.backend.max-workers = 16

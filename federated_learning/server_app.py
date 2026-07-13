@@ -8,7 +8,7 @@ import random
 from pathlib import Path
 from flwr.server import ServerApp, ServerConfig
 from flwr.server.strategy import FedAdam
-from flwr.common import Context, Parameters, FitRes, ndarrays_to_parameters, parameters_to_ndarrays
+from flwr.common import Context, Parameters, FitRes, EvaluateIns, ndarrays_to_parameters, parameters_to_ndarrays
 from flwr.common.record import ConfigRecord
 from federated_learning.client_app import MLP
 
@@ -49,21 +49,70 @@ class FedAdamWithScreening(FedAdam):
         
         # Template für State Dict Keys
         self.template_model = MLP(in_dim=model_dim)
+    
         
-        # ✅ Lade Val-Client-Range aus Split Meta für effiziente Evaluation
-        split_path = run_config.get("split-path")
-        self.val_client_range = None
-        if split_path:
-            try:
-                with open(split_path, "r") as f:
-                    split_data = json.load(f)
-                    meta = split_data.get("meta", {})
-                    self.val_client_range = meta.get("val_client_range")
-                    if self.val_client_range:
-                        print(f"✅ Val-Client-Range geladen: {self.val_client_range['min']}-{self.val_client_range['max']}")
-            except Exception as e:
-                print(f"⚠️  Konnte Val-Client-Range nicht laden: {e}")
-                self.val_client_range = None
+        # ✅ NEU: Server-side Val-Daten laden
+        self.val_loader = None
+        self.crit = None
+        self.threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65]
+        self._load_centralized_val()
+
+    
+    def _load_centralized_val(self):
+        """Lade Val-Daten direkt im Server (einmalig beim Start)."""
+        rc = self.run_config
+        split_path = rc.get("split-path")
+        
+        if not split_path:
+            print("⚠️  Kein split-path in run_config")
+            return
+        
+        try:
+            with open(split_path, "r") as f:
+                split_data = json.load(f)
+            
+            # ✅ Neue Struktur: centralized_val_row_ids als separate Liste
+            val_row_ids = split_data.get("centralized_val_row_ids", [])
+            
+            if not val_row_ids:
+                print("⚠️  Keine centralized_val_row_ids in Split-Datei")
+                return
+            
+            # Lade Val-Daten
+            from federated_learning.task import load_centralized_val
+            X_val, y_val, class_weights = load_centralized_val(
+                parquet_path=rc["prepared-parquet"],
+                stats_path=rc["norm-stats-json"],
+                val_row_ids=val_row_ids,
+            )
+            
+            # DataLoader erstellen
+            from torch.utils.data import TensorDataset, DataLoader
+            val_ds = TensorDataset(
+                torch.from_numpy(X_val), 
+                torch.from_numpy(y_val)
+            )
+            self.val_loader = DataLoader(val_ds, batch_size=256, shuffle=False)
+            
+            # Loss-Funktion
+            use_focal = rc.get("use-focal-loss", False)
+            if use_focal:
+                from federated_learning.client_app import FocalLoss
+                gamma = float(rc.get("focal-gamma", 2.0))
+                self.crit = FocalLoss(alpha=class_weights, gamma=gamma)
+            else:
+                self.crit = torch.nn.CrossEntropyLoss(weight=class_weights)
+            
+            print(f"✅ Centralized Val geladen: {len(val_row_ids)} samples")
+            
+        except Exception as e:
+            print(f"⚠️  Fehler beim Laden der Val-Daten: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def configure_evaluate(self, server_round, parameters, client_manager):
+        """Keine Client-Evaluation - wir machen das server-seitig."""
+        return []  # ✅ Leer - Evaluation passiert in aggregate_fit
     
     def aggregate_fit(
         self,
@@ -71,7 +120,7 @@ class FedAdamWithScreening(FedAdam):
         results: list[tuple[any, FitRes]],
         failures: list[tuple[any, FitRes] | BaseException],
     ) -> tuple[Parameters | None, dict[str, any]]:
-        """Aggregiere Gewichte und speichere den Checkpoint direkt auf Disk."""
+        """Aggregiere Gewichte und evaluiere server-seitig."""
         
         # 1) Standard FedAdam Aggregation
         aggregated_parameters, aggregated_metrics = super().aggregate_fit(
@@ -81,113 +130,129 @@ class FedAdamWithScreening(FedAdam):
         if aggregated_parameters is None:
             return None, {}
         
-        # 2) Speichere das aggregierte Modell direkt als Checkpoint auf Disk
+        # 2) Checkpoint speichern
         run_tag = str(self.run_config.get("run-tag", "1"))
-        checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}_run_{run_tag}.pt"
+        checkpoint_path = self.checkpoint_dir / f"all_rounds_run_{run_tag}" / f"model_round_{server_round}_run_{run_tag}.pt"
         self._save_checkpoint(server_round, aggregated_parameters, checkpoint_path)
         
-        return aggregated_parameters, aggregated_metrics
-    
-    def select_for_evaluate(self, server_round: int, available_clients, num_to_select: int):
-        """
-        ✅ OPTIMIZATION: Nur Val-Clients evaluieren!
-        
-        Nutzt die Val-Client-Range aus dem Split Meta (viel effizienter als Liste laden).
-        Standard Flower sampelt zufällig alle Clients.
-        Aber Clients ohne Val-Daten→ n_val=0 (Rechenaufwand verschwendet!)
-        
-        Diese Methode sampelt nur aus Clients mit echten Val-Daten.
-        → Spart Rechenaufwand + schneller Evaluation
-        """
-        # Speichere alle verfügbaren Client-IDs (als Ints)
-        all_cids = [int(client.node_id) for client in available_clients]
-        
-        # Filtere nur Val-Clients (aus Range)
-        if self.val_client_range:
-            min_cid = self.val_client_range.get("min", 0)
-            max_cid = self.val_client_range.get("max", 0)
-            val_clients = [c for c in all_cids if min_cid <= c <= max_cid]
-        else:
-            # Fallback: Wenn Range nicht geladen, nehme alle
-            val_clients = all_cids
-        
-        # Sample aus Val-Clients
-        if val_clients:
-            num_to_select = min(num_to_select, len(val_clients))
-            selected_ids = set(random.sample(val_clients, num_to_select))
-        else:
-            selected_ids = set()
-        
-        # Gebe nur die selected Clients zurück
-        selected_clients = [c for c in available_clients if int(c.node_id) in selected_ids]
-        
-        return selected_clients
-    
-    def aggregate_evaluate(
-        self,
-        server_round: int,
-        results: list[tuple[any, any]],
-        failures: list[tuple[any, any] | BaseException],
-    ) -> tuple[float | None, dict[str, any]]:
-        """Nach Evaluation: Prüfe ob beste Runde und speichere Checkpoint."""
-        
-        # ✅ 1) Early Exit: Keine Results 
-        if not results:
-            return None, {}
-        
-        # ✅ 2) Filtering: Nur Clients mit n_val > 0 
-        valid_results = []
-        for client_proxy, evaluate_res in results:
-            if evaluate_res.num_examples > 0:
-                valid_results.append((client_proxy, evaluate_res))
-        
-        # ✅ 3) Check: Alle n_val=0?
-        if not valid_results:
-            print(f"⏭Round {server_round}: Evaluation skipped")
-            return None, {}
-        
-        # ✅ 4) Standard Aggregation 
-        loss, metrics = super().aggregate_evaluate(server_round, valid_results, failures)
-        
-        if not metrics:
-            return loss, {}
-        
-        # 5) Speichere Metriken als JSON und verknüpfe den bereits gespeicherten Checkpoint
-        run_tag = str(self.run_config.get("run-tag", "1"))
-        checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}_run_{run_tag}.pt"
-        json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
-        
-        if checkpoint_path.exists():
+        # 3) ✅ NEU: Server-seitige Evaluation
+        if self.val_loader is not None:
+            eval_metrics = self._evaluate_centralized(aggregated_parameters, server_round)
+            
+            # Speichere Metriken als JSON
+            json_path = self.checkpoint_dir / f"all_rounds_run_{run_tag}" / f"round_{server_round}_run_{run_tag}.json"
+            json_path.parent.mkdir(parents=True, exist_ok=True)
             metrics_with_meta = {
                 "round": server_round,
-                "metrics": metrics,
+                "metrics": eval_metrics,
                 "model_checkpoint": str(checkpoint_path)
             }
-
             with open(json_path, "w") as f:
                 json.dump(metrics_with_meta, f, indent=2)
-
+            
             print(f"💾 Round {server_round}: Saved {checkpoint_path.name} + {json_path.name}")
-        else:
-            print(f"⚠️  Round {server_round}: Checkpoint missing at evaluation time: {checkpoint_path}")
 
-        # 6) OPTIONAL: Generiere Calibration & Risk Distribution Plots
-        # try:
-        #     from federated_learning.plotting.calibration_and_risk_plots import generate_both_plots
-        #     
-        #     plots_dir = self.checkpoint_dir / "plots"
-        #     generate_both_plots(
-        #         metrics,
-        #         output_dir=plots_dir,
-        #         round_num=server_round,
-        #         show=False  # Nicht im Background anzeigen
-        #     )
-        # except ImportError:
-        #     pass  # Plots sind optional
-        # except Exception as e:
-        #     print(f"⚠️  Plot generation failed: {e}")
+        # ✅ Letzte Runde: Explizit flushen
+        if server_round == 45:
+            import os
+            os.sync()  # Filesystem sync
+            print(f"✅ Run {run_tag} complete - filesystem synced")
+            
+        return aggregated_parameters, aggregated_metrics
+    
+    def _evaluate_centralized(self, parameters: Parameters, server_round: int) -> dict:
+        """Evaluiere das aggregierte Modell auf zentralen Val-Daten."""
+        from federated_learning.client_app import evaluate_multi_threshold
         
-        return loss, metrics
+        # 1) Lade Weights ins Modell
+        ndarrays = parameters_to_ndarrays(parameters)
+        state_dict_keys = list(self.template_model.state_dict().keys())
+        state_dict = {
+            k: torch.tensor(v, dtype=torch.float32) 
+            for k, v in zip(state_dict_keys, ndarrays)
+        }
+        self.template_model.load_state_dict(state_dict)
+        self.template_model.eval()
+        
+        # 2) Evaluiere mit Multi-Threshold
+        loss, n_samples, raw_metrics = evaluate_multi_threshold(
+            self.template_model,
+            self.val_loader,
+            self.crit,
+            self.threshold_grid
+        )
+        
+        # 3) Parse und aggregiere Metriken (wie in evaluate_metrics_aggregation_fn)
+        thresholds = json.loads(raw_metrics.get("thresholds_json", "[]"))
+        tp_list = json.loads(raw_metrics.get("tp_json", "[]"))
+        fp_list = json.loads(raw_metrics.get("fp_json", "[]"))
+        tn_list = json.loads(raw_metrics.get("tn_json", "[]"))
+        fn_list = json.loads(raw_metrics.get("fn_json", "[]"))
+        
+        # Berechne Metriken für jeden Threshold
+        threshold_results = []
+        for i, thr in enumerate(thresholds):
+            tp, fp = tp_list[i], fp_list[i]
+            tn, fn = tn_list[i], fn_list[i]
+            
+            tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            spec = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+            ppv = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            f1 = 2 * ppv * tpr / (ppv + tpr) if (ppv + tpr) > 0 else 0.0
+            
+            threshold_results.append({
+                "threshold": thr,
+                "tp": tp, "fp": fp, "tn": tn, "fn": fn,
+                "recall": tpr, "spec": spec, "precision": ppv, "f1": f1,
+            })
+        
+        # 4) Logging
+        print(f"\n📊 Round {server_round} Centralized Eval:")
+        print(f"   Loss: {loss:.4f}, Samples: {n_samples}")
+        for r in threshold_results[:3]:
+            print(f"   Thr={r['threshold']:.2f}: Rec={r['recall']:.3f}, Spec={r['spec']:.3f}, F1={r['f1']:.3f}")
+        if len(threshold_results) > 3:
+            print(f"   ... (+{len(threshold_results)-3} more)")
+        
+        # 5) Calibration & Risk Distribution parsen
+        calib_results = []
+        calib_edges = json.loads(raw_metrics.get("calib_edges_json", "[]"))
+        calib_bin_n = json.loads(raw_metrics.get("calib_bin_n_json", "[]"))
+        calib_sum_pred = json.loads(raw_metrics.get("calib_bin_sum_pred_json", "[]"))
+        calib_sum_true = json.loads(raw_metrics.get("calib_bin_sum_true_json", "[]"))
+        
+        for i in range(len(calib_bin_n)):
+            n_bin = calib_bin_n[i]
+            calib_results.append({
+                "bin_index": i,
+                "bin_edge_lower": calib_edges[i] if i < len(calib_edges) else 0.0,
+                "bin_edge_upper": calib_edges[i+1] if i+1 < len(calib_edges) else 1.0,
+                "n_samples": n_bin,
+                "mean_predicted_prob": calib_sum_pred[i] / n_bin if n_bin > 0 else 0.0,
+                "mean_observed_freq": calib_sum_true[i] / n_bin if n_bin > 0 else 0.0,
+            })
+        
+        risk_results = []
+        risk_edges = json.loads(raw_metrics.get("risk_edges_json", "[]"))
+        hist_y0 = json.loads(raw_metrics.get("hist_pred_y0_json", "[]"))
+        hist_y1 = json.loads(raw_metrics.get("hist_pred_y1_json", "[]"))
+        
+        for i in range(len(hist_y0)):
+            risk_results.append({
+                "bin_index": i,
+                "bin_edge_lower": risk_edges[i] if i < len(risk_edges) else 0.0,
+                "bin_edge_upper": risk_edges[i+1] if i+1 < len(risk_edges) else 1.0,
+                "count_y0": hist_y0[i],
+                "count_y1": hist_y1[i],
+            })
+        
+        return {
+            "centralized_loss": loss,
+            "centralized_n_samples": n_samples,
+            "all_thresholds": threshold_results,
+            "calibration": calib_results,
+            "risk_distribution": risk_results,
+        }
     
     def _save_checkpoint(
         self, 
@@ -195,22 +260,15 @@ class FedAdamWithScreening(FedAdam):
         parameters: Parameters,
         checkpoint_path: Path
     ):
-        """Speichert Flower Parameters als PyTorch State Dict.
-        
-        Args:
-            server_round: Aktuelle Runde
-            parameters: Flower Parameters-Objekt
-            checkpoint_path: Wo speichern
-        """
-        # 1) Konvertiere Flower Parameters zu NumPy Arrays
+
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+        """Speichert Flower Parameters als PyTorch State Dict."""
         ndarrays = parameters_to_ndarrays(parameters)
-        
-        # 2) Mappe zu PyTorch State Dict
         state_dict_keys = list(self.template_model.state_dict().keys())
         
         if len(ndarrays) != len(state_dict_keys):
-            print(f"Parameter count mismatch! "
-                  f"Expected {len(state_dict_keys)}, got {len(ndarrays)}")
+            print(f"Parameter count mismatch! Expected {len(state_dict_keys)}, got {len(ndarrays)}")
             return
         
         state_dict = {
@@ -218,10 +276,7 @@ class FedAdamWithScreening(FedAdam):
             for key, arr in zip(state_dict_keys, ndarrays)
         }
         
-        # Speichere auf Disk
         torch.save(state_dict, checkpoint_path)
-        print(f"Checkpoint saved: {checkpoint_path}")
-
 
 # flwr run lädt über pyproject.toml serverapp = "…server_app:app".
 # Flower ruft server_fn(context) auf.
@@ -347,20 +402,7 @@ def server_fn(context: Context) -> ServerAppComponents:
         }
     
     def on_evaluate_config_fn(rnd: int) -> dict:
-        """
-        ADAPTIVE Evaluation Schedule (Optimiert für schnelle Konvergenz):
-        - Runden 1-34: Alle 5 Runden (Warmup/Early Training, sparsamer evaluieren)
-        - Runden 35+: JEDE Runde (Dense Monitoring um Plateau zu erkennen)
-        - Runde 1 & letzte Runde: IMMER evaluieren
-        """
-        # Erste und letzte Runde IMMER evaluieren
-        if rnd == 1 or rnd == total_rounds:
-            pass  # Evaluation läuft
-        # Runden 2-20: Alle 5 Runden evaluieren
-        elif rnd < 15:
-            if rnd % 5 != 0:
-                return {}  # Skip Evaluation, senden leere Config
-        # Runden 35+: JEDE Runde evaluieren (dense monitoring)
+        """Run evaluation in every round."""
         
         # ✅ Threshold Grid (nur wenn Eval läuft)
         threshold_grid = [0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65]
@@ -653,5 +695,6 @@ def server_fn(context: Context) -> ServerAppComponents:
 # creates the model, defines the strategy, and sets the server config (numberof rounds)
 
 app = ServerApp(server_fn=server_fn)
+
 
 

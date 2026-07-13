@@ -7,8 +7,8 @@
 set -euo pipefail
 
 # IID Scaling: 2 → 177575 Clients (18 Datensätze)
-CLIENT_COUNTS=(4096)
-RUNS_PER_SPLIT=5
+CLIENT_COUNTS=(16)
+RUNS_PER_SPLIT=3
 
 echo "📊 IID SCALING EXPERIMENTS (18 Configurations)"
 echo "═══════════════════════════════════════"
@@ -84,18 +84,16 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
     if [ ${num_clients} -lt 100 ]; then
         # **BEREICH 1: 2-64 Clients (Cross-Silo FL)**
         range="Cross-Silo"
-        min_fit=$(( (num_clients * 8 + 9) / 10 ))  # 80% für Training
-        if [ ${min_fit} -lt 2 ]; then min_fit=2; fi
-        min_evaluate=${num_clients}
-        rounds=20
+        min_fit=$(( num_clients * 70 / 100 ))               # 80% für Training
+        min_evaluate=$(( num_clients * 9 / 10 ))  # 60% für Evaluation, also 6000 bei 10K
+        rounds=45
         
     elif [ ${num_clients} -lt 1000 ]; then
         # **BEREICH 2: 100-512 Clients (Mid-Scale FL)**  
         range="Mid-Scale"
-        min_fit=$(( (num_clients * 6 + 9) / 10 ))   # 60% für Training TODO: nochmal teste wie es mit 80% ausschaut
-        if [ ${min_fit} -lt 10 ]; then min_fit=10; fi
-        min_evaluate=$([ ${num_clients} -lt 100 ] && echo ${num_clients} || echo 100)
-        rounds=30
+        min_fit=$(( num_clients * 70 / 100 ))               # 80% für Training
+        min_evaluate=$(( num_clients * 9 / 10 ))  # 60% für Evaluation, also 6000 bei 10K
+        rounds=45
         
     elif [ ${num_clients} -lt 10000 ]; then
         # **BEREICH 3: 1K-8K Clients (Large-Scale FL)**
@@ -179,14 +177,17 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
             echo "   📋 Check log: ${log_file}"
         fi
         
-        # Pause zwischen Runs
-        if [ ${run} -lt ${RUNS_PER_SPLIT} ]; then
-            echo "   ⏳ Waiting 3s..."
-            ray stop --force 2>/dev/null || true  # ✅ NEW
-            rm -rf /tmp/ray/                       # ✅ NEW
-            sleep 3
-        fi
+        # ✅ WICHTIG: Cleanup NACH jedem Run (egal ob erfolgreich oder nicht)
+        echo "   🧹 Cleaning up Ray and syncing filesystem..."
+        ray stop --force 2>/dev/null || true
+        sleep 2
+        rm -rf /tmp/ray/ 2>/dev/null || true
+        sync  # ✅ Filesystem-Buffer flushen
+        sleep 5
+        
+        echo "   ✅ Cleanup complete"
     done
+
     
     echo ""
     echo "📊 ${num_clients} Clients: ${successful_runs}/${RUNS_PER_SPLIT} successful"

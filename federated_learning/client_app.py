@@ -282,16 +282,16 @@ class FlowerClient(NumPyClient):
         # 2. Client-spezifische Indices/ Row IDs extrahieren
         train_mapping = split_data.get("train", {})
         val_mapping = split_data.get("val", {})
+        meta = split_data.get("meta", {})
         
         if self.cid not in train_mapping:
             raise KeyError(f"cid {self.cid} fehlt in train mapping")
         
         # Client-spezifische Indices
         client_train_idx = train_mapping[self.cid]
-        # ✅ Val ist optional: Manche Clients haben keine Val-Daten
-        client_val_idx = val_mapping.get(self.cid, [])
 
-        print(f"[Client {self.cid}] Data split: Train:{len(client_train_idx)}, Validation: {len(client_val_idx)} ")
+        client_val_idx = []
+        # print(f"[Client {self.cid}] Data split: Train:{len(client_train_idx)}, Validation: {len(client_val_idx)} ")
         
         # 3. Lade Daten + Class-Weights (global berechnet, nicht für echtes FEL scenario :( ), hab ich jetzt schon vorher in normalice and add weights angewand, könnte man nochmal umschrieben.
         boost_factor = float(rc.get("pos-weight-boost", 2.0))
@@ -301,6 +301,7 @@ class FlowerClient(NumPyClient):
             stats_path=rc["norm-stats-json"],
             train_row_ids=client_train_idx,
             val_row_ids=client_val_idx,
+            centralized_val_row_ids=None,
         )
         
         # 4. DataLoader erstellen
