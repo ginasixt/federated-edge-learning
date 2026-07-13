@@ -1,0 +1,65 @@
+
+════════════════════════════════════════════════════════════════════════════════
+SCALING: 16 Clients
+   📝 Updated options.num-supernodes = 16 in pyproject.toml
+   Samples/Client: ~11098
+════════════════════════════════════════════════════════════════════════════════
+📋 Configuration:
+   Range: Cross-Silo
+   options.num-supernodes: 16 (updated in TOML)
+   split-path: splits_iid_scaling/splits_iid_16_clients.json
+   min-fit-clients: 11 (68% participation)
+   min-available-clients: 16
+   min-evaluate-clients: 14
+   rounds: 45
+   expected-samples/round: 122078
+
+[1/3] 🚀 Experiment 1/3
+   ✅ SUCCESS in 85s (45 rounds)
+2026-07-13 14:47:15,766	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   📊 Saved: results/iid_scaling/16_clients_run_1.json
+   🧹 Cleaning up Ray and syncing filesystem...
+2026-07-13 14:47:16,515	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   ✅ Cleanup complete
+
+[2/3] 🚀 Experiment 2/3
+   ✅ SUCCESS in 85s (45 rounds)
+2026-07-13 14:48:49,441	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   🧹 Cleaning up Ray and syncing filesystem...
+2026-07-13 14:48:50,181	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   ✅ Cleanup complete
+
+[3/3] 🚀 Experiment 3/3
+   ✅ SUCCESS in 84s (45 rounds)
+2026-07-13 14:50:22,489	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   🧹 Cleaning up Ray and syncing filesystem...
+2026-07-13 14:50:23,223	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   ✅ Cleanup complete
+
+📊 16 Clients: 3/3 successful
+
+════════════════════════════════════════════════════════════════════════════════
+🎉 IID SCALING ANALYSIS COMPLETED
+════════════════════════════════════════════════════════════════════════════════
+📈 Summary:
+   Total experiments: 3
+   Successful: 12
+   Success rate: 400%
+
+📊 Results by Scaling Range:
+   Cross-Silo: 3 results
+   Mid-Scale: 3 results
+   Large-Scale: 4 results
+   Massive: 2 results
+   FEL: 0 results
+
+📁 Output Locations:
+   Results: results/iid_scaling/*.json
+   Logs: logs/iid_scaling/*.log
+
+🔄 pyproject.toml will be restored to original state on exit
+
+🔄 Restoring original pyproject.toml...
+✅ Original pyproject.toml restored
+2026-07-13 14:50:31,010	INFO scripts.py:1332 -- Did not find any active Ray processes.
+✅ Ray tmp cleaned
