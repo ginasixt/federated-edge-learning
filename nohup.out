@@ -1415,3 +1415,34 @@ SCALING: 4096 Clients
    expected-samples/round: 140868
 
 [1/1] 🚀 Experiment 1/1
+   ✅ SUCCESS in 11589s (80 rounds)
+2026-07-14 13:35:56,166	INFO scripts.py:1332 -- Did not find any active Ray processes.
+   📊 Saved: results/iid_scaling/4096_clients_run_1.json
+
+📊 4096 Clients: 1/1 successful
+
+════════════════════════════════════════════════════════════════════════════════
+🎉 IID SCALING ANALYSIS COMPLETED
+════════════════════════════════════════════════════════════════════════════════
+📈 Summary:
+   Total experiments: 1
+   Successful: 4
+   Success rate: 400%
+
+📊 Results by Scaling Range:
+   Cross-Silo: 0 results
+   Mid-Scale: 0 results
+   Large-Scale: 3 results
+   Massive: 1 results
+   FEL: 0 results
+
+📁 Output Locations:
+   Results: results/iid_scaling/*.json
+   Logs: logs/iid_scaling/*.log
+
+🔄 pyproject.toml will be restored to original state on exit
+
+🔄 Restoring original pyproject.toml...
+✅ Original pyproject.toml restored
+2026-07-14 13:35:56,990	INFO scripts.py:1332 -- Did not find any active Ray processes.
+✅ Ray tmp cleaned
