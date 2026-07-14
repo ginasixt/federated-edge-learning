@@ -1,5 +1,5 @@
 """
-Passt Val-Daten in splits_iid_4096_clients.json an:
+Passt Val-Daten in splits_iid_2048_clients.json an:
 - Konzentriert Val-Samples auf weniger Clients
 - Ziel: avg_val_per_client ≈ avg_train_per_client (10-11 statt 1.5)
 """
@@ -8,7 +8,7 @@ import numpy as np
 from pathlib import Path
 
 # Lade aktuellen Split
-split_path = Path("splits_iid_scaling/splits_iid_4096_clients.json")
+split_path = Path("splits_iid_scaling/splits_iid_2048_clients.json")
 with open(split_path) as f:
     data = json.load(f)
 
@@ -30,7 +30,7 @@ print()
 
 # --- Strategie: Val auf weniger Clients verteilen ---
 # Ziel: ~10 Val-Samples pro Client
-target_val_per_client = 21.0
+target_val_per_client = total_val_samples
 num_val_clients = int(np.ceil(total_val_samples / target_val_per_client))
 
 print(f"🎯 Neue Verteilung:")
@@ -96,7 +96,7 @@ if "meta" not in data:
     data["meta"] = {}
 data["meta"]["val_client_range"] = val_client_range
 
-output_path = Path("splits_iid_scaling/splits_iid_4096_clients_adjusted.json")
+output_path = Path("splits_iid_scaling/splits_iid_2048_clients_adjusted.json")
 with open(output_path, "w") as f:
     json.dump(data, f, indent=2)
 
@@ -104,5 +104,5 @@ print(f"💾 Gespeichert: {output_path}")
 print()
 print(f"📌 Verwendung in deinem Code:")
 print(f"   Ändere Zeile in task.py/server_app.py:")
-print(f"   FROM: 'splits_iid_scaling/splits_iid_4096_clients.json'")
-print(f"   TO:   'splits_iid_scaling/splits_iid_4096_clients_adjusted.json'")
+print(f"   FROM: 'splits_iid_scaling/splits_iid_2048_clients.json'")
+print(f"   TO:   'splits_iid_scaling/splits_iid_2048_clients_adjusted.json'")
