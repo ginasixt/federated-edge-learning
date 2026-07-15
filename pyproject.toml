@@ -60,8 +60,8 @@ num-server-rounds = 50
 # Keep large client participation per training round.
 # With 8,384 clients, fraction-fit=0.8 samples about 13,107 clients per round.
 fraction-fit = 0.8
-min-fit-clients = 200
-min-available-clients = 500
+min-fit-clients = 30
+min-available-clients = 60
 
 # Evaluation is reduced for stability.
 # Full evaluation with all 8,384 clients every round can be very expensive.
@@ -73,7 +73,7 @@ local-epochs = 1
 dataset-path = "data/diabetes.csv"
 prepared-parquet = "data/diabetes_normalized.parquet"
 norm-stats-json = "data/norm_stats.json"
-split-path = "splits_iid_scaling/splits_iid_512_clients.json"
+split-path = "splits_iid_scaling/splits_iid__clients.json"
 
 # Client
 # Since most clients have only a few samples, this usually results in one local batch.
