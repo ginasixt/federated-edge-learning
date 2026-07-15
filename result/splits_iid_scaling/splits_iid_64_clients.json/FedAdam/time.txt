@@ -1,81 +1,9 @@
+Run 1:  ✅ SUCCESS in 64s (45 rounds)
 
-════════════════════════════════════════════════════════════════════════════════
-SCALING: 64 Clients
-   📝 Updated options.num-supernodes = 64 in pyproject.toml
-   Samples/Client: ~2774
-════════════════════════════════════════════════════════════════════════════════
-📋 Configuration:
-   Range: Cross-Silo
-   options.num-supernodes: 64 (updated in TOML)
-   split-path: splits_iid_scaling/splits_iid_64_clients.json
-   min-fit-clients: 44 (68% participation)
-   min-available-clients: 64
-   min-evaluate-clients: 57
-   rounds: 45
-   expected-samples/round: 122056
+Run 2: ✅ SUCCESS in 63s (45 rounds)
 
-[1/5] 🚀 Experiment 1/5
-   ✅ SUCCESS in 67s (45 rounds)
-2026-07-08 23:05:03,858	INFO scripts.py:1332 -- Did not find any active Ray processes.
-   📊 Saved: results/iid_scaling/64_clients_run_1.json
-   🧹 Cleaning up Ray and syncing filesystem...
-2026-07-08 23:05:04,588	INFO scripts.py:1332 -- Did not find any active Ray processes.
-   ✅ Cleanup complete
+Run 3: ✅ SUCCESS in 63s (45 rounds)
 
-[2/5] 🚀 Experiment 2/5
-   ✅ SUCCESS in 66s (45 rounds)
-2026-07-08 23:06:17,716	INFO scripts.py:1332 -- Did not find any active Ray processes.
-   🧹 Cleaning up Ray and syncing filesystem...
-2026-07-08 23:06:18,449	INFO scripts.py:1332 -- Did not find any active Ray processes.
-   ✅ Cleanup complete
+Run 4:✅ SUCCESS in 63s (45 rounds)
 
-[3/5] 🚀 Experiment 3/5
-   ✅ SUCCESS in 68s (45 rounds)
-2026-07-08 23:07:33,688	INFO scripts.py:1332 -- Did not find any active Ray processes.
-   🧹 Cleaning up Ray and syncing filesystem...
-2026-07-08 23:07:34,414	INFO scripts.py:1332 -- Did not find any active Ray processes.
-   ✅ Cleanup complete
-
-[4/5] 🚀 Experiment 4/5
-   ✅ SUCCESS in 66s (45 rounds)
-2026-07-08 23:08:48,634	INFO scripts.py:1332 -- Did not find any active Ray processes.
-   🧹 Cleaning up Ray and syncing filesystem...
-2026-07-08 23:08:49,362	INFO scripts.py:1332 -- Did not find any active Ray processes.
-
-Run 5: 
-[1/1] 🚀 Experiment 1/1
-   ✅ SUCCESS in 83s (45 rounds)
-Did not find any active Ray processes.
-   📊 Saved: results/iid_scaling/64_clients_run_1.json
-   🧹 Cleaning up Ray and syncing filesystem...
-Did not find any active Ray processes.
-   ✅ Cleanup complete
-
-📊 64 Clients: 1/1 successful
-
-════════════════════════════════════════════════════════════════════════════════
-🎉 IID SCALING ANALYSIS COMPLETED
-════════════════════════════════════════════════════════════════════════════════
-📈 Summary:
-   Total experiments: 1
-   Successful: 10
-   Success rate: 1000%
-
-📊 Results by Scaling Range:
-   Cross-Silo: 1 results
-   Mid-Scale: 3 results
-   Large-Scale: 4 results
-   Massive: 2 results
-   FEL: 0 results
-
-📁 Output Locations:
-   Results: results/iid_scaling/*.json
-   Logs: logs/iid_scaling/*.log
-
-🔄 pyproject.toml will be restored to original state on exit
-
-🔄 Restoring original pyproject.toml...
-✅ Original pyproject.toml restored
-Did not find any active Ray processes.
-✅ Ray tmp cleaned
-(.venv) sh-5.2$ 
+Run 5: ✅ SUCCESS in 62s (45 rounds)
