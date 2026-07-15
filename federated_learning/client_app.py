@@ -305,7 +305,7 @@ class FlowerClient(NumPyClient):
         )
         
         # 4. DataLoader erstellen
-        bs = int(rc.get("batch-size", 128))
+        bs = int(rc.get("batch-size", 90000))
         self.train_loader, self.val_loader = make_loaders_from_arrays(
             X_train, y_train, X_val, y_val, batch_size=bs
         )

@@ -7,8 +7,8 @@
 set -euo pipefail
 
 # IID Scaling: 2 → 177575 Clients (18 Datensätze)
-CLIENT_COUNTS=(16)
-RUNS_PER_SPLIT=2
+CLIENT_COUNTS=(128)
+RUNS_PER_SPLIT=1
 
 echo "📊 IID SCALING EXPERIMENTS (18 Configurations)"
 echo "═══════════════════════════════════════"

@@ -84,7 +84,7 @@ def make_loaders_from_arrays(X_train, y_train, X_val, y_val, batch_size=128):
     
     return (
         DataLoader(train_ds, batch_size=batch_size, shuffle=True, pin_memory=False),
-        DataLoader(val_ds, batch_size=batch_size, shuffle=False, pin_memory=False)
+        DataLoader(val_ds, batch_size=512, shuffle=False, pin_memory=False)
     )
 
 def load_centralized_val(
