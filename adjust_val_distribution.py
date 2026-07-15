@@ -15,12 +15,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
-        default="splits_iid_scaling/splits_iid_2_clients.json",
+        default="splits_iid_scaling/splits_iid_8192_clients.json",
         help="Input split JSON path",
     )
     parser.add_argument(
         "--output",
-        default="splits_iid_scaling/splits_iid_2_clients_centralized_val.json",
+        default="splits_iid_scaling/splits_iid_8192_clients_centralized_val.json",
         help="Output split JSON path",
     )
     args = parser.parse_args()

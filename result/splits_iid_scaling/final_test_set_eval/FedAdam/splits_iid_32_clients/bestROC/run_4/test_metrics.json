@@ -1,0 +1,33 @@
+{
+  "strategy": "FedAdam",
+  "scaling_point": 32,
+  "selection_metric": "ROC",
+  "selection_set": "centralized_validation",
+  "evaluation_set": "centralized_test",
+  "run": 4,
+  "selected_round": 45,
+  "selected_checkpoint": "result/splits_iid_scaling/splits_iid_32_clients.json/FedAdam/bestROC/run_4/model_round_45_run_1.pt",
+  "original_source_checkpoint": "result/splits_iid_scaling/splits_iid_32_clients.json/FedAdam/all_rounds_run_4/model_round_45_run_1.pt",
+  "validation_selection_metrics": {
+    "roc_auc": 0.8293587733710392,
+    "pr_auc": 0.4245757386461544,
+    "loss": 0.4860033004008245,
+    "n_samples": 25368,
+    "source_checkpoint": "result/splits_iid_scaling/splits_iid_32_clients.json/FedAdam/all_rounds_run_4/model_round_45_run_1.pt",
+    "curves_file": "result/splits_iid_scaling/splits_iid_32_clients.json/FedAdam/bestROC/run_4/curves.json"
+  },
+  "test_metrics": {
+    "loss": 0.4918829308029453,
+    "roc_auc": 0.8248381254754541,
+    "pr_auc": 0.42154918486215526,
+    "pr_average_precision": 0.42154918486215526,
+    "pr_auc_definition": "average_precision_score",
+    "n_samples": 50737,
+    "n_positive": 7069,
+    "n_negative": 43668,
+    "positive_prevalence": 0.1393263298973136,
+    "pr_auc_trapezoidal": 0.4214320824564694,
+    "roc_auc_from_curve": 0.8248381254754541
+  },
+  "test_curves_file": "result/splits_iid_scaling/final_test_set_eval/FedAdam/splits_iid_32_clients/bestROC/run_4/test_curves.json"
+}
