@@ -32,10 +32,10 @@ import pandas as pd
 
 
 DEFAULT_ROOT = Path(
-    "/home/bax9142/federated-edge-learning/result/splits_iid_scaling/splits_iid_8192_clients.json/FedProx"
+    "result/splits_iid_scaling/splits_iid_16384_clients.json"
 )
 DEFAULT_OUT = Path(
-    "/home/bax9142/federated-edge-learning/result/plots/splits_iid_scaling_metric_panels"
+    "result/plots/splits_iid_scaling_metric_panels"
 )
 
 ROUND_FILE_RE = re.compile(r"round_(\d+)_run_1\.json$")
