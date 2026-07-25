@@ -219,7 +219,7 @@ def server_fn(context: Context) -> ServerAppComponents:
     """Build ScaffoldFedAvg strategy + server config."""
     rc = dict(context.run_config)
 
-    checkpoint_dir     = Path(f"result/{rc.get('split-path', 'default')}/all_rounds/")
+    checkpoint_dir     = Path(f"result/{rc.get('split-path', 'default')}/SCAFFOLD/")
     model_dim          = 21
     total_rounds       = int(rc.get("num-server-rounds", 80))
     num_total_clients  = int(rc.get("min-available-clients", 32768))

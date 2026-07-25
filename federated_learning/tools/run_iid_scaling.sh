@@ -7,8 +7,8 @@
 set -euo pipefail
 
 # IID Scaling: 2 → 177575 Clients (18 Datensätze)
-CLIENT_COUNTS=(64)
-RUNS_PER_SPLIT=2
+CLIENT_COUNTS=(256 512 1024 2048)
+RUNS_PER_SPLIT=5
 
 echo "📊 IID SCALING EXPERIMENTS (18 Configurations)"
 echo "═══════════════════════════════════════"
@@ -176,7 +176,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
             echo "   ⏳ Waiting 3s..."
             ray stop --force 2>/dev/null || true  # ✅ NEW
             rm -rf /tmp/ray/                       # ✅ NEW
-            sleep 3
+            sleep 5
         fi
     done
     
@@ -187,7 +187,7 @@ for num_clients in "${CLIENT_COUNTS[@]}"; do
     last_client=${CLIENT_COUNTS[${#CLIENT_COUNTS[@]}-1]}
     if [ ${num_clients} -ne ${last_client} ]; then
         echo "   ⏳ Waiting 5s before next scaling step..."
-        sleep 5
+        sleep 15
     fi
 done
 
