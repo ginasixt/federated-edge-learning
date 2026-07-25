@@ -1,0 +1,52 @@
+ IID SCALING EXPERIMENTS (18 Configurations)
+═══════════════════════════════════════
+Client counts: 32
+Total Training Samples: 177575 (constant)
+Runs per split: 5
+
+
+════════════════════════════════════════════════════════════════════════════════
+SCALING: 32 Clients
+   📝 Updated options.num-supernodes = 32 in pyproject.toml
+   Samples/Client: ~5549
+════════════════════════════════════════════════════════════════════════════════
+📋 Configuration:
+   Range: Cross-Silo
+   options.num-supernodes: 32 (updated in TOML)
+   split-path: splits_iid_scaling/splits_iid_32_clients.json
+   min-fit-clients: 25 (78% participation)
+   min-available-clients: 32
+   min-evaluate-clients: 32
+   rounds: 80
+   expected-samples/round: 138725
+
+[1/5] 🚀 Experiment 1/5
+   ✅ SUCCESS in 176s (80 rounds)
+Did not find any active Ray processes.
+   📊 Saved: results/iid_scaling/32_clients_run_1.json
+   ⏳ Waiting 3s...
+Did not find any active Ray processes.
+
+[2/5] 🚀 Experiment 2/5
+   ✅ SUCCESS in 164s (80 rounds)
+Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+Did not find any active Ray processes.
+
+[3/5] 🚀 Experiment 3/5
+   ✅ SUCCESS in 185s (80 rounds)
+Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+Did not find any active Ray processes.
+
+[4/5] 🚀 Experiment 4/5
+   ✅ SUCCESS in 182s (80 rounds)
+Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+Did not find any active Ray processes.
+
+[5/5] 🚀 Experiment 5/5
+   ✅ SUCCESS in 178s (80 rounds)
+Did not find any active Ray processes.
+
+📊 32 Clients: 5/5 successful
