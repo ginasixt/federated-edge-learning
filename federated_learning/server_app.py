@@ -104,7 +104,9 @@ class ScaffoldFedAvg(FedAvg):
         #     del self.parameters_cache[min(self.parameters_cache)]
 
         run_tag = str(self.run_config.get("run-tag", "1"))
-        checkpoint_path = self.checkpoint_dir / f"model_round_{server_round}_run_{run_tag}.pt"
+        checkpoint_path = self.checkpoint_dir / f"all_rounds_run_{run_tag}" / f"model_round_{server_round}_run_{run_tag}.pt"
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        self._save_checkpoint(server_round, aggregated_parameters, checkpoint_path)
         self._save_checkpoint(server_round, aggregated_parameters, checkpoint_path)
 
         # ── 3) Lazy-init global control variate ───────────────────────────
@@ -176,7 +178,8 @@ class ScaffoldFedAvg(FedAvg):
             return loss, {}
 
         run_tag   = str(self.run_config.get("run-tag", "1"))
-        json_path = self.checkpoint_dir / f"round_{server_round}_run_{run_tag}.json"
+        json_path = self.checkpoint_dir / f"all_rounds_run_{run_tag}" / f"round_{server_round}_run_{run_tag}.json"
+        json_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(json_path, "w") as f:
             json.dump(
