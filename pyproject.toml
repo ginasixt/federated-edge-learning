@@ -71,7 +71,7 @@ norm-stats-json = "data/norm_stats.json"
 split-path = "splits_iid_scaling/splits_iid_2048_clients.json"
 
 # Client
-batch-size = 256  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
+batch-size = 9000  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
 mu = 1e-3  # ✅ VARIANTE B: 2x höher als FedProx_4 (sehr starke FedProx-Ridge)
 lr = 8e-2  # ✅ VARIANTE B: 1.6x höher als FedProx_4 (noch aggressiveres Lernen)
 lr-after = 3e-2  # ✅ VARIANTE B: 1.5x höher als FedProx_4
