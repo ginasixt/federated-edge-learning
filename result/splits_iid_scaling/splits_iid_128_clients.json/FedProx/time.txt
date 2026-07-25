@@ -1,0 +1,80 @@
+inasixt@MacBook-von-Gina federated-edge-learning-2 % federated_learning/tools/run_iid_scaling.sh
+📊 IID SCALING EXPERIMENTS (18 Configurations)
+═══════════════════════════════════════
+Client counts: 128
+Total Training Samples: 177575 (constant)
+Runs per split: 5
+
+
+════════════════════════════════════════════════════════════════════════════════
+SCALING: 128 Clients
+   📝 Updated options.num-supernodes = 128 in pyproject.toml
+   Samples/Client: ~1387
+════════════════════════════════════════════════════════════════════════════════
+📋 Configuration:
+   Range: small-Scale
+   options.num-supernodes: 128 (updated in TOML)
+   split-path: splits_iid_scaling/splits_iid_128_clients.json
+   min-fit-clients: 102 (79% participation)
+   min-available-clients: 128
+   min-evaluate-clients: 128
+   rounds: 80
+   expected-samples/round: 141474
+
+[1/5] 🚀 Experiment 1/5
+   ✅ SUCCESS in 437s (80 rounds)
+Did not find any active Ray processes.
+   📊 Saved: results/iid_scaling/128_clients_run_1.json
+   ⏳ Waiting 3s...
+Did not find any active Ray processes.
+
+[2/5] 🚀 Experiment 2/5
+   ✅ SUCCESS in 428s (80 rounds)
+Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+Did not find any active Ray processes.
+
+[3/5] 🚀 Experiment 3/5
+   ✅ SUCCESS in 490s (80 rounds)
+Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+Did not find any active Ray processes.
+
+[4/5] 🚀 Experiment 4/5
+   ✅ SUCCESS in 494s (80 rounds)
+Did not find any active Ray processes.
+   ⏳ Waiting 3s...
+Did not find any active Ray processes.
+
+[5/5] 🚀 Experiment 5/5
+   ✅ SUCCESS in 470s (80 rounds)
+Did not find any active Ray processes.
+
+📊 128 Clients: 5/5 successful
+
+════════════════════════════════════════════════════════════════════════════════
+🎉 IID SCALING ANALYSIS COMPLETED
+════════════════════════════════════════════════════════════════════════════════
+📈 Summary:
+   Total experiments: 5
+   Successful:       11
+   Success rate: 220%
+
+📊 Results by Scaling Range:
+   Cross-Silo:        5 results
+   Mid-Scale:        2 results
+   Large-Scale:        3 results
+   Massive:        1 results
+   FEL:        0 results
+
+📁 Output Locations:
+   Results: results/iid_scaling/*.json
+   Logs: logs/iid_scaling/*.log
+
+🔄 pyproject.toml will be restored to original state on exit
+
+🔄 Restoring original pyproject.toml...
+✅ Original pyproject.toml restored
+Did not find any active Ray processes.
+✅ Ray tmp cleaned
+(.venv) ginasixt@MacBook-von-Gina federated-edge-learning-2 % 
