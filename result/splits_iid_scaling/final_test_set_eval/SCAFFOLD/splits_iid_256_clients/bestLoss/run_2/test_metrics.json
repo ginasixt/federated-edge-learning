@@ -1,0 +1,34 @@
+{
+  "strategy": "SCAFFOLD",
+  "scaling_point": 256,
+  "selection_metric": "Loss",
+  "selection_set": "validation_client_0",
+  "validation_index_source": "split_file:val['0']",
+  "evaluation_set": "centralized_test",
+  "run": 2,
+  "selected_round": 80,
+  "selected_checkpoint": "result/splits_iid_scaling/splits_iid_256_clients.json/SCAFFOLD/bestLoss/run_2/model_round_80_run_2.pt",
+  "original_source_checkpoint": "result/splits_iid_scaling/splits_iid_256_clients.json/SCAFFOLD/all_rounds_run_2/model_round_80_run_2.pt",
+  "validation_selection_metrics": {
+    "roc_auc": 0.8170895944015298,
+    "pr_auc": 0.4005897849037369,
+    "loss": 0.5076392669040788,
+    "n_samples": 25368,
+    "source_checkpoint": "result/splits_iid_scaling/splits_iid_256_clients.json/SCAFFOLD/all_rounds_run_2/model_round_80_run_2.pt",
+    "curves_file": "result/splits_iid_scaling/splits_iid_256_clients.json/SCAFFOLD/bestLoss/run_2/curves.json"
+  },
+  "test_metrics": {
+    "loss": 0.5119829357365724,
+    "roc_auc": 0.8128543670730031,
+    "pr_auc": 0.394193222070198,
+    "pr_average_precision": 0.394193222070198,
+    "pr_auc_definition": "average_precision_score",
+    "n_samples": 50737,
+    "n_positive": 7069,
+    "n_negative": 43668,
+    "positive_prevalence": 0.1393263298973136,
+    "pr_auc_trapezoidal": 0.3940077076641787,
+    "roc_auc_from_curve": 0.8128543670730031
+  },
+  "test_curves_file": "result/splits_iid_scaling/final_test_set_eval/SCAFFOLD/splits_iid_256_clients/bestLoss/run_2/test_curves.json"
+}

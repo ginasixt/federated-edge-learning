@@ -57,9 +57,9 @@ num-server-rounds = 81
 fraction-fit = 0.5  # 80% = 26.214 Clients
 
 fraction-evaluate = 1.0
-min-fit-clients = 5000
-min-available-clients = 3800
-min-evaluate-clients = 4096
+min-fit-clients = 55
+min-available-clients = 55
+min-evaluate-clients = 55
 local-epochs = 2
 
 # Datenpfade
@@ -69,7 +69,7 @@ norm-stats-json = "data/norm_stats.json"
 split-path = "splits_iid_scaling/splits_iid_4096_clients.json"
 
 # Client
-batch-size = 128  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
+batch-size = 9000  # ✅ Egal bei 4-6 Samples (wird nur 1 Batch)
 mu = 0
 lr = 1e-2
 lr-after = 1e-2

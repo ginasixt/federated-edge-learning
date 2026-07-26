@@ -1,0 +1,26 @@
+Suggested APA-style figure captions
+===================================
+
+Figure 1
+Threshold-independent test performance of SCAFFOLD across client scaling points.
+Note. Panel A shows ROC-AUC for checkpoints selected by validation ROC-AUC,
+Panel B shows average precision for checkpoints selected by validation average
+precision, and Panel C shows weighted cross-entropy loss for checkpoints
+selected by validation loss. Small gray points represent individual runs; filled colored circles and connecting lines represent means across runs. Each scaling point contains up
+to n = 5 independent runs. The client axis is logarithmic to base 2.
+Restricted y-axis ranges are used to make small differences visible.
+
+Figure 2
+Relative change in threshold-independent SCAFFOLD test performance from the
+2-client baseline.
+Note. Values are calculated from the mean across runs at each scaling point.
+Positive values in Panels A and B indicate higher ROC-AUC or average precision
+than at 2 clients. Positive values in Panel C indicate an increase in weighted
+loss and therefore worse performance. The dashed horizontal line denotes no
+change from the baseline.
+
+Figure 3
+Run-to-run variability of threshold-independent SCAFFOLD test performance.
+Note. Each cell reports the maximum absolute deviation of an individual run from the mean, expressed as a percentage of the mean. ROC-AUC, average precision, and weighted loss are
+reported for checkpoints selected by their corresponding validation metric.
+Values are percentages.
