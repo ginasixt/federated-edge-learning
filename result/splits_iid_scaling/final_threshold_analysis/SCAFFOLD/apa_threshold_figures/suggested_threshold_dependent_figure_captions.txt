@@ -1,0 +1,12 @@
+Suggested APA-style figure captions
+===================================
+
+Figure X
+Threshold-Dependent SCAFFOLD Test Performance at the MCC-Optimal Operating Point
+
+Note. For each run, the checkpoint with the highest validation average precision was selected before threshold optimization. The decision threshold was then selected by maximizing MCC over all distinct operating points induced by the validation scores and transferred unchanged to the test set. Panel A shows the validation-selected threshold, Panel B shows test MCC, and Panel C shows test recall and specificity at the corresponding MCC-optimal operating point. Small gray points represent individual runs; colored markers and connecting lines represent means across 5 repeated runs. In Panel C, solid circles represent recall and dashed open squares represent specificity. Recall and specificity in Panel C characterize separately optimized operating points and are therefore not standardized across scaling configurations. The client axis is logarithmic to base 2. Restricted panel-specific y-axis ranges make small differences visible.
+
+Figure X
+Threshold-Dependent SCAFFOLD Test Performance Under a Fixed Validation Recall Requirement
+
+Note. For each run, the checkpoint with the highest validation average precision was selected before threshold optimization. Among all distinct operating points induced by the validation scores that satisfied recall >= 0.80, the threshold yielding the highest validation specificity was selected and transferred unchanged to the test set. Panel A shows the validation-selected threshold, Panel B shows test recall, and Panel C shows test specificity. The dashed horizontal line in Panel B denotes the prespecified validation recall requirement; test recall is shown because the constraint was imposed on the validation set rather than the test set. Small gray points represent individual runs; colored markers and connecting lines represent means across 5 repeated runs. The client axis is logarithmic to base 2. Restricted panel-specific y-axis ranges make small differences visible.
