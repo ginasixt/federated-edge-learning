@@ -1,0 +1,34 @@
+{
+  "strategy": "FedProx",
+  "scaling_point": 1024,
+  "selection_metric": "ROC",
+  "selection_set": "centralized_validation",
+  "validation_index_source": "split_file:val['0']",
+  "evaluation_set": "centralized_test",
+  "run": 3,
+  "selected_round": 80,
+  "selected_checkpoint": "result/splits_iid_scaling/splits_iid_1024_clients.json/FedProx/bestROC/run_3/model_round_80_run_3.pt",
+  "original_source_checkpoint": "result/splits_iid_scaling/splits_iid_1024_clients.json/FedProx/all_rounds_FedProx_3/model_round_80_run_3.pt",
+  "validation_selection_metrics": {
+    "roc_auc": 0.8166489860572712,
+    "pr_auc": 0.3964094813985827,
+    "loss": 0.5045000369387171,
+    "n_samples": 25368,
+    "source_checkpoint": "result/splits_iid_scaling/splits_iid_1024_clients.json/FedProx/all_rounds_FedProx_3/model_round_80_run_3.pt",
+    "curves_file": "result/splits_iid_scaling/splits_iid_1024_clients.json/FedProx/bestROC/run_3/curves.json"
+  },
+  "test_metrics": {
+    "loss": 0.5080651054803145,
+    "roc_auc": 0.8139576875622156,
+    "pr_auc": 0.39331597348706504,
+    "pr_average_precision": 0.39331597348706504,
+    "pr_auc_definition": "average_precision_score",
+    "n_samples": 50737,
+    "n_positive": 7069,
+    "n_negative": 43668,
+    "positive_prevalence": 0.1393263298973136,
+    "pr_auc_trapezoidal": 0.3931331043747225,
+    "roc_auc_from_curve": 0.8139576875622156
+  },
+  "test_curves_file": "result/splits_iid_scaling/final_test_set_eval/FedProx/splits_iid_1024_clients/bestROC/run_3/test_curves.json"
+}

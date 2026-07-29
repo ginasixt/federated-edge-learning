@@ -1,0 +1,33 @@
+{
+  "evaluation_set": "centralized_test",
+  "selection_set": "centralized_validation",
+  "validation_index_source": "split_file:val['0']",
+  "selection_policy": "Checkpoints are fixed before test evaluation; no model, round, threshold, or hyperparameter is selected on the test set.",
+  "parquet_path": "data/diabetes_normalized.parquet",
+  "norm_stats_path": "data/norm_stats.json",
+  "test_index_source": "norm_stats.json:test_idx",
+  "test_row_ids_sha256_sorted": "207ab8708ca491ed8409b5e9a6cc9f478d5936b472ee74277238a752c5bdcca8",
+  "n_samples": 50737,
+  "n_positive": 7069,
+  "n_negative": 43668,
+  "positive_prevalence": 0.1393263298973136,
+  "n_features": 21,
+  "target": "Diabetes_binary",
+  "binary_label_rule": "y = 1 if original target >= 1 else 0",
+  "data_already_normalized": true,
+  "class_weights": {
+    "negative": 0.13933268189430237,
+    "positive": 1.2910009622573853
+  },
+  "split_integrity": {
+    "train_size": 177575,
+    "validation_size": 25368,
+    "test_size": 50737,
+    "total_unique_rows": 253680,
+    "overlaps": {
+      "train_val": 0,
+      "train_test": 0,
+      "val_test": 0
+    }
+  }
+}
