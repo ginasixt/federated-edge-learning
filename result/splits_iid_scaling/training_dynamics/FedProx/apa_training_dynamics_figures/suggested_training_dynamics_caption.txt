@@ -1,0 +1,7 @@
+Suggested APA-style figure caption
+==================================
+
+Figure X
+FedProx Test-Set Training Dynamics Across Client Scaling
+
+Note. All saved communication-round checkpoints were evaluated retrospectively on the centralized test set using average precision (AP). Panel A shows, for each run, the first evaluated round at which test AP reached at least 99% of the highest test AP observed within that run. Panel B shows the ordinary least-squares linear trend in test AP per communication round from rounds 70 to 80 inclusive. The 11 AP observations span a 10-round interval. Positive values indicate increasing AP, values near zero indicate little systematic change, and negative values indicate decreasing AP during the final training phase. Small gray points represent individual runs; colored markers and connecting lines represent means across five repeated runs. The dashed horizontal line in Panel B denotes no linear AP change. The client axis is logarithmic to base 2. The retrospective test trajectories were used only to describe training dynamics and did not alter training, validation-based checkpoint selection, thresholds, or hyperparameters.
