@@ -662,11 +662,11 @@ def plot_absolute_performance(
     fig, axes = plt.subplots(
         3,
         1,
-        figsize=(width, width * 1.30),
+        figsize=(width, width * 1.0),
         sharex=True,
         constrained_layout=False,
     )
-    fig.subplots_adjust(left=0.10, right=0.985, top=0.985, bottom=0.12, hspace=0.25)
+    fig.subplots_adjust(left=0.10, right=0.985, top=0.985, bottom=0.12, hspace=0.20)
 
     export_rows: List[Dict[str, object]] = []
 
