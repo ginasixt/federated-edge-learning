@@ -80,7 +80,7 @@ VAL_CLIENT_ID = "0"          # JSON-Schlüssel: vollständiges Val-Set liegt bei
 # Alle Skalierungspunkte (Anzahl Clients)
 SCALING_POINTS: List[int] = [
     2, 4, 8, 16, 32, 64, 128, 256, 512,
-    1024, 2048, 4096, 8192, 16384, 32768,
+    1024, 2048, 4096, 8192, 16384,
 ]
 
 # Metriken: name -> (Richtung, wie aus einem Eval-Result der Vergleichswert kommt)

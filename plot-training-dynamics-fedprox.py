@@ -1,0 +1,645 @@
+#!/usr/bin/env python3
+"""
+APA-Style FedProx Test-Set Training-Dynamics Figure
+=====================================================
+
+This script plots the run-level output created by:
+
+    evaluate-training-dynamics-fedprox.py
+
+Default input
+-------------
+result/splits_iid_scaling/training_dynamics/FedProx/
+    training_dynamics_by_run.csv
+
+Generated figure
+----------------
+Panel A
+    First evaluated communication round at which test AP reached at least
+    99% of the best test AP observed within the respective run.
+
+Panel B
+    Linear test-AP trend per communication round from rounds 70 to 80
+    inclusive.
+
+Design
+------
+The figure follows the visual language of the supplied FedProx thesis plots:
+* Arial-compatible sans-serif typography
+* UHH-based restrained colors
+* small gray points for individual runs
+* colored circles and connecting lines for means across runs
+* bold panel labels A and B only
+* base-2 logarithmic client axis
+* shared neutral legend centered below the panels
+* no decorative title inside the figure
+* PDF and high-resolution PNG output
+
+Example
+-------
+python plot-training-dynamics-fedprox.py
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from matplotlib.font_manager import findfont
+from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter, MaxNLocator
+import numpy as np
+import pandas as pd
+
+
+DEFAULT_ANALYSIS_ROOT = Path(
+    "result/splits_iid_scaling/training_dynamics/FedProx"
+)
+DEFAULT_INPUT = DEFAULT_ANALYSIS_ROOT / "training_dynamics_by_run.csv"
+DEFAULT_OUTPUT_DIR = DEFAULT_ANALYSIS_ROOT / "apa_training_dynamics_figures"
+
+DEFAULT_STRATEGY = "FedProx"
+EXPECTED_RUNS = 5
+EXPECTED_SCALING_POINTS = 14
+DEFAULT_FORMATS: Tuple[str, ...] = ("pdf", "png")
+PNG_DPI = 300
+FIGURE_WIDTH = 12.0
+
+SCALING_POINTS: Tuple[int, ...] = (
+    2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384,
+)
+
+LINE_WIDTH = 1.80
+MARKER_SIZE = 3.00
+MARKER_EDGE_WIDTH = 0.50
+INDIVIDUAL_POINT_SIZE = 12
+GRID_ALPHA = 0.22
+GRID_LINEWIDTH = 0.55
+
+UHH_RED = "#E2001A"
+UHH_BLUE = "#0271BB"
+UHH_SLATE = "#3B515B"
+INK = "#202124"
+REFERENCE_GRAY = "#6B7280"
+INDIVIDUAL_RUN_GRAY = "#9AA0A6"
+SHARED_LEGEND_GRAY = UHH_SLATE
+
+TRAINING_SPEED_COLOR = UHH_BLUE
+LATE_TREND_COLOR = UHH_RED
+
+REQUIRED_COLUMNS = {
+    "strategy",
+    "scaling_point",
+    "run",
+    "ap_fraction",
+    "first_round_reaching_fraction",
+    "late_window_complete",
+    "late_window_start_round",
+    "late_window_end_round",
+    "late_mean_test_ap",
+    "late_test_ap_slope_per_round",
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Create an APA-style two-panel FedProx test-set "
+            "training-dynamics figure."
+        )
+    )
+    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--strategy", default=DEFAULT_STRATEGY)
+    parser.add_argument("--expected-runs", type=int, default=EXPECTED_RUNS)
+    parser.add_argument(
+        "--expected-scaling-points", type=int, default=EXPECTED_SCALING_POINTS
+    )
+    parser.add_argument(
+        "--formats",
+        nargs="+",
+        choices=("pdf", "png", "svg", "tiff"),
+        default=list(DEFAULT_FORMATS),
+    )
+    parser.add_argument("--font", default="Arial")
+    parser.add_argument("--width", type=float, default=FIGURE_WIDTH)
+    return parser.parse_args()
+
+
+def available_font(preferred: str) -> str:
+    for candidate in (preferred, "Liberation Sans", "DejaVu Sans"):
+        try:
+            findfont(candidate, fallback_to_default=False)
+            return candidate
+        except ValueError:
+            continue
+    return "DejaVu Sans"
+
+
+def configure_matplotlib(font_name: str) -> None:
+    mpl.rcParams.update({
+        "font.family": font_name,
+        "font.size": 10.5,
+        "axes.labelsize": 12.0,
+        "axes.titlesize": 12.0,
+        "xtick.labelsize": 10.5,
+        "ytick.labelsize": 10.5,
+        "legend.fontsize": 9.2,
+        "axes.linewidth": 0.90,
+        "axes.edgecolor": INK,
+        "axes.labelcolor": INK,
+        "xtick.color": INK,
+        "ytick.color": INK,
+        "text.color": INK,
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "savefig.facecolor": "white",
+        "savefig.edgecolor": "white",
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.05,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "svg.fonttype": "none",
+    })
+
+
+def parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n", ""}:
+        return False
+    raise ValueError(f"Cannot parse Boolean value: {value!r}")
+
+
+def read_and_validate(
+    path: Path,
+    strategy: str,
+    expected_runs: int,
+    expected_scaling_points: int,
+) -> pd.DataFrame:
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Training-dynamics input not found:\n  {path}\n\n"
+            "Run evaluate-training-dynamics-fedprox.py first."
+        )
+
+    frame = pd.read_csv(path)
+    missing = REQUIRED_COLUMNS - set(frame.columns)
+    if missing:
+        raise ValueError(
+            "Input is missing required columns:\n  " + "\n  ".join(sorted(missing))
+        )
+
+    frame = frame.copy()
+    frame["strategy"] = frame["strategy"].astype(str)
+    frame = frame[frame["strategy"] == strategy].copy()
+    if frame.empty:
+        raise ValueError(f"No rows found for strategy '{strategy}'.")
+
+    numeric_columns = (
+        "scaling_point",
+        "run",
+        "ap_fraction",
+        "first_round_reaching_fraction",
+        "late_window_start_round",
+        "late_window_end_round",
+        "late_mean_test_ap",
+        "late_test_ap_slope_per_round",
+    )
+    for column in numeric_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    if frame[list(numeric_columns)].isna().any().any():
+        invalid = frame[frame[list(numeric_columns)].isna().any(axis=1)]
+        raise ValueError(
+            "Invalid required numeric values:\n" + invalid.head(10).to_string(index=False)
+        )
+
+    frame["scaling_point"] = frame["scaling_point"].astype(int)
+    frame["run"] = frame["run"].astype(int)
+    frame["late_window_complete"] = frame["late_window_complete"].map(parse_bool)
+
+    duplicate_key = ["strategy", "scaling_point", "run"]
+    duplicates = frame.duplicated(duplicate_key, keep=False)
+    if duplicates.any():
+        raise ValueError(
+            "Duplicate scaling-point/run rows found:\n"
+            + frame.loc[duplicates, duplicate_key]
+            .sort_values(duplicate_key)
+            .to_string(index=False)
+        )
+
+    n_points = frame["scaling_point"].nunique()
+    if n_points != expected_scaling_points:
+        raise ValueError(
+            f"Expected {expected_scaling_points} scaling points, found {n_points}."
+        )
+
+    run_counts = frame.groupby("scaling_point")["run"].nunique()
+    incorrect = run_counts[run_counts != expected_runs]
+    if not incorrect.empty:
+        details = ", ".join(
+            f"{int(clients)} clients: n={int(count)}"
+            for clients, count in incorrect.items()
+        )
+        raise ValueError(
+            f"Expected {expected_runs} runs at every scaling point; {details}."
+        )
+
+    fractions = frame["ap_fraction"].unique()
+    if len(fractions) != 1:
+        raise ValueError(
+            "Expected one AP fraction across all runs, found: "
+            + ", ".join(f"{value:.6g}" for value in sorted(fractions))
+        )
+
+    late_starts = frame["late_window_start_round"].unique()
+    late_ends = frame["late_window_end_round"].unique()
+    if len(late_starts) != 1 or len(late_ends) != 1:
+        raise ValueError(
+            "Expected one common late-training window across all runs; found "
+            f"starts={sorted(late_starts.tolist())}, "
+            f"ends={sorted(late_ends.tolist())}."
+        )
+    if int(late_starts[0]) != 70 or int(late_ends[0]) != 80:
+        raise ValueError(
+            "This plot version expects the late-training window rounds 70-80; "
+            f"the CSV contains rounds {int(late_starts[0])}-{int(late_ends[0])}. "
+            "Re-run evaluate-training-dynamics-fedprox-rounds-70-80.py first."
+        )
+
+    incomplete = frame[~frame["late_window_complete"]]
+    if not incomplete.empty:
+        details = incomplete[["scaling_point", "run"]].to_dict(orient="records")
+        raise ValueError(
+            "Panel B requires complete final communication-round windows. "
+            f"Incomplete runs: {details}"
+        )
+
+    observed = tuple(sorted(frame["scaling_point"].unique().tolist()))
+    if observed != SCALING_POINTS:
+        print(
+            "Warning: observed scaling points differ from the default sequence:\n"
+            f"  {list(observed)}"
+        )
+
+    return frame.sort_values(["scaling_point", "run"]).reset_index(drop=True)
+
+
+def aggregate_results(raw: pd.DataFrame) -> pd.DataFrame:
+    records: List[Dict[str, Any]] = []
+    for scaling_point, group in raw.groupby("scaling_point", sort=True):
+        first_round = group["first_round_reaching_fraction"].to_numpy(dtype=float)
+        late_mean_ap = group["late_mean_test_ap"].to_numpy(dtype=float)
+        slope = group["late_test_ap_slope_per_round"].to_numpy(dtype=float)
+        records.append({
+            "strategy": str(group["strategy"].iloc[0]),
+            "scaling_point": int(scaling_point),
+            "n_runs": int(group["run"].nunique()),
+            "ap_fraction": float(group["ap_fraction"].iloc[0]),
+            "first_round_reaching_fraction_mean": float(np.mean(first_round)),
+            "first_round_reaching_fraction_std": float(np.std(first_round, ddof=1)),
+            "first_round_reaching_fraction_min": float(np.min(first_round)),
+            "first_round_reaching_fraction_max": float(np.max(first_round)),
+            "late_mean_test_ap_mean": float(np.mean(late_mean_ap)),
+            "late_mean_test_ap_std": float(np.std(late_mean_ap, ddof=1)),
+            "late_test_ap_slope_per_round_mean": float(np.mean(slope)),
+            "late_test_ap_slope_per_round_std": float(np.std(slope, ddof=1)),
+            "late_test_ap_slope_per_round_min": float(np.min(slope)),
+            "late_test_ap_slope_per_round_max": float(np.max(slope)),
+        })
+    return pd.DataFrame.from_records(records)
+
+
+def client_label(value: int) -> str:
+    if value >= 1024 and value % 1024 == 0:
+        return f"{value // 1024}k"
+    return f"{value:,}"
+
+
+def client_positions(clients: Sequence[int]) -> np.ndarray:
+    return np.log2(np.asarray(clients, dtype=float))
+
+
+def deterministic_jitter(count: int, span: float = 0.16) -> np.ndarray:
+    if count <= 1:
+        return np.zeros(count, dtype=float)
+    return np.linspace(-span, span, count, dtype=float)
+
+
+def set_client_axis(ax: plt.Axes, clients: Sequence[int], show_label: bool) -> None:
+    positions = client_positions(clients)
+    ax.set_xticks(positions)
+    ax.set_xticklabels([client_label(int(value)) for value in clients])
+    ax.set_xlim(float(positions.min() - 0.35), float(positions.max() + 0.35))
+    ax.set_xlabel("Number of clients (log2 scale)" if show_label else "")
+
+
+def style_axis(ax: plt.Axes) -> None:
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color(INK)
+    ax.spines["bottom"].set_color(INK)
+    ax.spines["left"].set_linewidth(0.90)
+    ax.spines["bottom"].set_linewidth(0.90)
+    ax.tick_params(
+        colors=INK, direction="out", labelsize=10.5, length=4.0, width=0.85
+    )
+    ax.grid(True, alpha=GRID_ALPHA, linewidth=GRID_LINEWIDTH, linestyle="-")
+    ax.set_axisbelow(True)
+
+
+def set_panel_label(ax: plt.Axes, panel: str) -> None:
+    ax.text(
+        -0.075,
+        1.020,
+        panel,
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=12.0,
+        fontweight="bold",
+        color=INK,
+        clip_on=False,
+    )
+
+
+def trimmed_decimal_formatter(max_decimals: int) -> FuncFormatter:
+    def _format(value: float, _position: object) -> str:
+        if not np.isfinite(value):
+            return ""
+        if max_decimals == 0:
+            return str(int(round(value)))
+        text = f"{value:.{max_decimals}f}".rstrip("0").rstrip(".")
+        return "0" if text in {"", "-0"} else text
+    return FuncFormatter(_format)
+
+
+def padded_limits(
+    values: Iterable[float],
+    minimum_span: float,
+    include_value: Optional[float] = None,
+    padding_fraction: float = 0.12,
+) -> Tuple[float, float]:
+    array = np.asarray(list(values), dtype=float)
+    array = array[np.isfinite(array)]
+    if array.size == 0:
+        return (0.0, 1.0)
+    low = float(np.min(array))
+    high = float(np.max(array))
+    if include_value is not None:
+        low = min(low, include_value)
+        high = max(high, include_value)
+    center = (low + high) / 2.0
+    span = max(high - low, minimum_span)
+    low = center - span / 2.0
+    high = center + span / 2.0
+    padding = span * padding_fraction
+    return low - padding, high + padding
+
+
+def scatter_individual_runs(
+    ax: plt.Axes,
+    raw: pd.DataFrame,
+    clients: Sequence[int],
+    metric: str,
+) -> List[float]:
+    all_values: List[float] = []
+    for clients_value in clients:
+        values = (
+            raw[raw["scaling_point"] == clients_value]
+            .sort_values("run")[metric]
+            .to_numpy(dtype=float)
+        )
+        x_center = float(np.log2(clients_value))
+        ax.scatter(
+            x_center + deterministic_jitter(len(values)),
+            values,
+            s=INDIVIDUAL_POINT_SIZE,
+            marker="o",
+            facecolor=INDIVIDUAL_RUN_GRAY,
+            edgecolor="white",
+            linewidth=0.35,
+            alpha=0.65,
+            zorder=2,
+        )
+        all_values.extend(values.tolist())
+    return all_values
+
+
+def plot_mean_line(
+    ax: plt.Axes,
+    aggregate: pd.DataFrame,
+    metric: str,
+    color: str,
+) -> None:
+    x = client_positions(aggregate["scaling_point"].to_numpy(dtype=int))
+    means = aggregate[metric].to_numpy(dtype=float)
+    ax.plot(
+        x,
+        means,
+        color=color,
+        linewidth=LINE_WIDTH,
+        linestyle="-",
+        alpha=0.97,
+        marker="o",
+        markersize=MARKER_SIZE,
+        markerfacecolor=color,
+        markeredgecolor="white",
+        markeredgewidth=MARKER_EDGE_WIDTH,
+        zorder=3,
+    )
+
+
+def add_shared_legend(fig: plt.Figure, axes: Sequence[plt.Axes]) -> None:
+    handles = [
+        Line2D(
+            [0], [0], linestyle="none", marker="o", markersize=4.5,
+            markerfacecolor=INDIVIDUAL_RUN_GRAY, markeredgecolor="white",
+            markeredgewidth=0.35, alpha=0.65, label="Individual run",
+        ),
+        Line2D(
+            [0], [0], color=SHARED_LEGEND_GRAY, linewidth=LINE_WIDTH,
+            marker="o", markersize=4.5, markerfacecolor=SHARED_LEGEND_GRAY,
+            markeredgecolor="white", markeredgewidth=MARKER_EDGE_WIDTH,
+            label="Mean across runs",
+        ),
+        Line2D(
+            [0], [0], color=REFERENCE_GRAY, linewidth=1.0,
+            linestyle="--", label="No linear AP change",
+        ),
+    ]
+    bottom_axis = axes[-1]
+    position = bottom_axis.get_position()
+    legend_x = position.x0 + position.width / 2
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        bbox_to_anchor=(legend_x, 0.018),
+        ncol=3,
+        frameon=True,
+        framealpha=0.95,
+        fontsize=9.2,
+        borderaxespad=0.0,
+        columnspacing=1.5,
+        handlelength=2.4,
+    )
+
+
+def save_figure(
+    fig: plt.Figure,
+    output_dir: Path,
+    stem: str,
+    formats: Sequence[str],
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for fmt in formats:
+        output_path = output_dir / f"{stem}.{fmt}"
+        kwargs: Dict[str, Any] = {}
+        if fmt == "png":
+            kwargs["dpi"] = PNG_DPI
+        elif fmt == "tiff":
+            kwargs["dpi"] = PNG_DPI
+            kwargs["pil_kwargs"] = {"compression": "tiff_lzw"}
+        fig.savefig(output_path, format=fmt, **kwargs)
+        print(f"  ✓ {output_path}")
+
+
+def write_caption(
+    output_dir: Path,
+    ap_fraction: float,
+    late_window_start: int,
+    late_window_end: int,
+) -> Path:
+    path = output_dir / "suggested_training_dynamics_caption.txt"
+    percentage = ap_fraction * 100.0
+    text = f"""Suggested APA-style figure caption
+==================================
+
+Figure X
+FedProx Test-Set Training Dynamics Across Client Scaling
+
+Note. All saved communication-round checkpoints were evaluated retrospectively on the centralized test set using average precision (AP). Panel A shows, for each run, the first evaluated round at which test AP reached at least {percentage:.0f}% of the highest test AP observed within that run. Panel B shows the ordinary least-squares linear trend in test AP per communication round from rounds {late_window_start} to {late_window_end} inclusive. The 11 AP observations span a 10-round interval. Positive values indicate increasing AP, values near zero indicate little systematic change, and negative values indicate decreasing AP during the final training phase. Small gray points represent individual runs; colored markers and connecting lines represent means across five repeated runs. The dashed horizontal line in Panel B denotes no linear AP change. The client axis is logarithmic to base 2. The retrospective test trajectories were used only to describe training dynamics and did not alter training, validation-based checkpoint selection, thresholds, or hyperparameters.
+"""
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def main() -> None:
+    args = parse_args()
+    font_name = available_font(args.font)
+    configure_matplotlib(font_name)
+
+    print("=" * 82)
+    print("APA-STYLE FEDPROX TEST-SET TRAINING-DYNAMICS FIGURE")
+    print(f"Input     : {args.input}")
+    print(f"Output    : {args.output_dir}")
+    print(f"Strategy  : {args.strategy}")
+    print(f"Font      : {font_name}")
+    print(f"Formats   : {', '.join(args.formats)}")
+    print("=" * 82)
+
+    raw = read_and_validate(
+        args.input,
+        args.strategy,
+        args.expected_runs,
+        args.expected_scaling_points,
+    )
+    aggregate = aggregate_results(raw)
+    clients = aggregate["scaling_point"].astype(int).tolist()
+    ap_fraction = float(raw["ap_fraction"].iloc[0])
+    late_window_start = int(raw["late_window_start_round"].iloc[0])
+    late_window_end = int(raw["late_window_end_round"].iloc[0])
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    aggregate_path = args.output_dir / "training_dynamics_plot_aggregate.csv"
+    aggregate.to_csv(aggregate_path, index=False)
+
+    fig, axes = plt.subplots(
+        2, 1, figsize=(args.width, 5.9), sharex=True, constrained_layout=False
+    )
+    fig.subplots_adjust(
+        left=0.105, right=0.985, top=0.965, bottom=0.185, hspace=0.30
+    )
+
+    values_a = scatter_individual_runs(
+        axes[0], raw, clients, "first_round_reaching_fraction"
+    )
+    plot_mean_line(
+        axes[0], aggregate, "first_round_reaching_fraction_mean", TRAINING_SPEED_COLOR
+    )
+    style_axis(axes[0])
+    set_panel_label(axes[0], "A")
+    axes[0].set_ylabel(
+        f"First round reaching\n{ap_fraction * 100:.0f}% of best AP"
+    )
+    axes[0].yaxis.set_major_locator(MaxNLocator(nbins=6, integer=True))
+    axes[0].yaxis.set_major_formatter(trimmed_decimal_formatter(0))
+    axes[0].set_ylim(*padded_limits(values_a, minimum_span=10.0))
+    set_client_axis(axes[0], clients, show_label=False)
+
+    values_b = scatter_individual_runs(
+        axes[1], raw, clients, "late_test_ap_slope_per_round"
+    )
+    plot_mean_line(
+        axes[1], aggregate, "late_test_ap_slope_per_round_mean", LATE_TREND_COLOR
+    )
+    axes[1].axhline(
+        0.0, color=REFERENCE_GRAY, linewidth=1.0, linestyle="--", zorder=1
+    )
+    style_axis(axes[1])
+    set_panel_label(axes[1], "B")
+    axes[1].set_ylabel("AP trend per round")
+    axes[1].yaxis.set_major_locator(MaxNLocator(nbins=6))
+    axes[1].yaxis.set_major_formatter(trimmed_decimal_formatter(5))
+    axes[1].set_ylim(
+        *padded_limits(values_b, minimum_span=0.0005, include_value=0.0)
+    )
+    set_client_axis(axes[1], clients, show_label=True)
+
+    add_shared_legend(fig, axes)
+    save_figure(
+        fig,
+        args.output_dir,
+        "figure_training_dynamics_test_ap",
+        args.formats,
+    )
+    plt.close(fig)
+
+    figure_values = aggregate[[
+        "strategy",
+        "scaling_point",
+        "n_runs",
+        "ap_fraction",
+        "first_round_reaching_fraction_mean",
+        "first_round_reaching_fraction_std",
+        "late_mean_test_ap_mean",
+        "late_mean_test_ap_std",
+        "late_test_ap_slope_per_round_mean",
+        "late_test_ap_slope_per_round_std",
+    ]]
+    figure_values_path = args.output_dir / "figure_training_dynamics_values.csv"
+    figure_values.to_csv(figure_values_path, index=False)
+    caption_path = write_caption(
+        args.output_dir,
+        ap_fraction,
+        late_window_start,
+        late_window_end,
+    )
+
+    print()
+    print("Finished. Main outputs:")
+    print("  Figure        : figure_training_dynamics_test_ap")
+    print(f"  Plot data     : {figure_values_path}")
+    print(f"  Full aggregate: {aggregate_path}")
+    print(f"  Caption       : {caption_path}")
+    print("=" * 82)
+
+
+if __name__ == "__main__":
+    main()

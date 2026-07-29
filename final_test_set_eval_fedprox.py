@@ -125,7 +125,6 @@ SCALING_POINTS: List[int] = [
     4096,
     8192,
     16384,
-    32768,
 ]
 
 FINAL_OUTPUT_ROOT = RESULT_ROOT / "final_test_set_eval" / STRATEGY
