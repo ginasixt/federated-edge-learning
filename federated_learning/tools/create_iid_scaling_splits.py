@@ -38,7 +38,7 @@ def create_iid_scaling_partitions(
     train_idx = np.array(meta["train_idx"])
     val_idx = np.array(meta["val_idx"])
     
-    print(f"📊 IID SCALING ANALYSIS")
+    print(f" IID SCALING ANALYSIS")
     print(f"   ════════════════════════════════════════")
     print(f"   Total Train Samples: {len(train_idx):,}")
     print(f"   Total Val Samples:   {len(val_idx):,}")
@@ -143,7 +143,7 @@ def create_iid_scaling_partitions(
             "paradigm": "iid_scaling"
         })
         
-        print(f"   ✅ {output_file.name}")
+        print(f"   {output_file.name}")
         print(f"      Samples/Client: {avg_samples:.1f} (range: {np.min(train_sizes)}-{np.max(train_sizes)})")
         print(f"      Val/Client:     {np.mean(val_sizes):.1f}")
         print(f"      Label Std:      {label_std:.4f} (natural IID variation)")
@@ -151,7 +151,7 @@ def create_iid_scaling_partitions(
         
         # Warnung bei zu wenigen Samples
         if avg_samples < min_samples_per_client:
-            print(f"   ⚠️  Warning: Avg samples ({avg_samples:.1f}) below minimum ({min_samples_per_client})")
+            print(f"    Warning: Avg samples ({avg_samples:.1f}) below minimum ({min_samples_per_client})")
     
     # Summary-Report erstellen
     summary_file = output_path / "iid_scaling_summary.json"
@@ -182,7 +182,7 @@ def create_iid_scaling_partitions(
     
     summary_file.write_text(json.dumps(summary, indent=2))
     
-    print(f"\n📋 IID Scaling Summary:")
+    print(f"\n IID Scaling Summary:")
     print(f"   Created Splits:     {len(client_counts)}")
     print(f"   Client Range:       {min(client_counts)} → {max(client_counts)}")
     print(f"   Data Distribution:  Random uniform (IID)")
@@ -190,7 +190,7 @@ def create_iid_scaling_partitions(
     print(f"   Output Directory:   {output_dir}/")
     
     # Vergleichstabelle
-    print(f"\n📊 Quick Overview:")
+    print(f"\n Quick Overview:")
     print(f"   {'Clients':>8} {'Avg/Client':>12} {'Min':>6} {'Max':>6} {'Label Std':>10}")
     print(f"   {'-'*8} {'-'*12} {'-'*6} {'-'*6} {'-'*10}")
     for result in results:

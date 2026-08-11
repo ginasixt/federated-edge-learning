@@ -1,10 +1,10 @@
 """
 Normalisiert ein bestehendes Parquet und ergänzt Class-Weights in norm_stats.json.
 
-✅ Nutzt VORHANDENE Splits aus norm_stats.json
-✅ Normalisiert nur Train/Val/Test (keine neuen Splits!)
-✅ Berechnet Class-Weights auf Train
-✅ Deine bestehenden Client-Splits bleiben unverändert!
+  Nutzt VORHANDENE Splits aus norm_stats.json
+  Normalisiert nur Train/Val/Test (keine neuen Splits!)
+  Berechnet Class-Weights auf Train
+  Deine bestehenden Client-Splits bleiben unverändert!
 
 Einmalig ausführen:
     python3 federated_learning/tools/normalize_and_add_weights.py --parquet data/diabetes.parquet --stats data/norm_stats.json --output data/diabetes_normalized.parquet --pos-weight-boost 1.5
@@ -51,7 +51,7 @@ def normalize_parquet_and_add_weights(
     
     X = df.drop(columns=[target_col, "__row_id__"])
     
-    # ✅ Normalisiere (mit Stats aus Training!)
+    #   Normalisiere (mit Stats aus Training!)
     std_safe = std.replace(0, 1)  # guard: prevent division-by-zero for zero-variance features
     X_normalized = (X - mean) / std_safe
     
@@ -98,7 +98,7 @@ def normalize_parquet_and_add_weights(
     
     # 9. Summary
     print("\n" + "=" * 60)
-    print("✅ ERFOLGREICH ABGESCHLOSSEN!")
+    print("  ERFOLGREICH ABGESCHLOSSEN!")
     print("=" * 60)
     print(f"\n📦 Normalisiertes Parquet:")
     print(f"   {output_parquet}")

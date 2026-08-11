@@ -1,0 +1,17 @@
+Suggested APA-style figure captions
+===================================
+
+Figure X
+Threshold-Dependent Test Performance of FedProx, SCAFFOLD, and FedAdam at the MCC-Optimal Operating Point
+
+Note. For each strategy, run, and scaling point, the checkpoint with the highest validation average precision was selected before threshold optimization. The decision threshold was then selected by maximizing MCC on the validation set and transferred unchanged to the centralized test set. Panel A shows the mean validation-selected threshold, Panel B shows mean test MCC, and Panel C shows mean test recall and specificity at the corresponding operating points. Lines represent means across five repeated runs. Colors distinguish the optimization strategies; solid circles and dashed open squares distinguish recall and specificity, respectively. The comparison includes the 14 scaling points shared by all strategies (2-16,384 clients). The client axis is logarithmic to base 2.
+
+Figure X
+Threshold-Dependent Test Performance of FedProx, SCAFFOLD, and FedAdam Under a Fixed Validation Recall Requirement
+
+Note. For each strategy, run, and scaling point, the checkpoint with the highest validation average precision was selected before threshold optimization. Among the validation operating points satisfying recall >= 0.80, the threshold yielding the highest validation specificity was selected and transferred unchanged to the centralized test set. Panel A shows the mean validation-selected threshold, and Panel B shows mean test recall and specificity. The dotted horizontal line denotes the prespecified validation recall requirement. Lines represent means across five repeated runs. Colors distinguish the optimization strategies; solid circles and dashed open squares distinguish recall and specificity, respectively. The comparison includes the 14 scaling points shared by all strategies (2-16,384 clients). The client axis is logarithmic to base 2.
+
+Figure X
+Threshold-Independent Test-Set Performance of FedProx, SCAFFOLD, and FedAdam Across Client Scaling Points
+
+Note. Panel A shows mean test ROC-AUC for checkpoints selected by validation ROC-AUC, Panel B shows mean test average precision for checkpoints selected by validation average precision, and Panel C shows mean weighted test loss for checkpoints selected by validation loss. Lines represent means across five repeated runs; colors and markers distinguish the optimization strategies. The comparison includes the 14 scaling points shared by all strategies (2-16,384 clients). The client axis is logarithmic to base 2. No model, round, threshold, or hyperparameter was selected on the test set.

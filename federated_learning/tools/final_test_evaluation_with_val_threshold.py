@@ -34,7 +34,7 @@ def load_training_result(result_json: Path) -> Dict:
     best_threshold = result["metrics"]["best_threshold"]
     round_num = result["round"]
     
-    print(f"✅ Loaded training result:")
+    print(f" Loaded training result:")
     print(f"   Best Round:      {round_num}")
     print(f"   Val Threshold:   {best_threshold:.4f}")
     print(f"   Val AUC:         {result['metrics']['auc']:.4f}")
@@ -84,7 +84,7 @@ def evaluate_on_test(
     # 3) ROC-Kurve für Visualisierung
     fpr, tpr, thresholds = roc_curve(y_test, probs)
     
-    # 4) ✅ Verwende FESTEN Threshold aus Training
+    # 4)  Verwende FESTEN Threshold aus Training
     preds = (probs >= fixed_threshold).astype(int)
     
     # 5) Confusion Matrix
@@ -105,7 +105,7 @@ def evaluate_on_test(
     prevalence = safe_div(tp + fn, len(y_test))
     alerts_per_1000 = safe_div(tp + fp, len(y_test)) * 1000
     
-    # 7) ✅ Separiere ROC-Daten (für Plot) und Report (für JSON)
+    # 7)  Separiere ROC-Daten (für Plot) und Report (für JSON)
     roc_data = {
         "fpr": fpr,
         "tpr": tpr,
@@ -142,12 +142,12 @@ def evaluate_on_test(
     report_path = output_dir / "test_report.json"
     report_path.write_text(json.dumps(report, indent=2))
     
-    # 10) ✅ Speichere ROC-Daten separat (nur für internen Gebrauch)
+    # 10)  Speichere ROC-Daten separat (nur für internen Gebrauch)
     roc_path = output_dir / "test_roc_data.npz"
     np.savez(roc_path, fpr=fpr, tpr=tpr, thresholds=thresholds)
-    print(f"📊 ROC data saved separately: {roc_path}")
+    print(f"  ROC data saved separately: {roc_path}")
     
-    return report, roc_data  # ✅ Gebe beides zurück (für Plot)
+    return report, roc_data  #  Gebe beides zurück (für Plot)
 
 
 def plot_scientific_roc(
@@ -176,7 +176,7 @@ def plot_scientific_roc(
     ax.plot([0, 1], [0, 1], '--', linewidth=1.5, color='#7f7f7f', 
            alpha=0.6, label='Random Classifier', zorder=1)
     
-    # ✅ Operating Point: Dezenter Marker statt Stern
+    #  Operating Point: Dezenter Marker statt Stern
     ax.plot(fpr[idx], tpr[idx], 'o', markersize=10, 
             color='#d62728', markeredgecolor='black', 
             markeredgewidth=1.5, zorder=3,
@@ -241,7 +241,7 @@ def plot_scientific_roc(
                facecolor='white', edgecolor='none')
     plt.close()
     
-    print(f"📊 ROC curve saved: {output_path}")
+    print(f"  ROC curve saved: {output_path}")
 
 
 def plot_confusion_matrix(
@@ -301,7 +301,7 @@ def plot_confusion_matrix(
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"📊 Confusion matrix saved: {output_path}")
+    print(f"  Confusion matrix saved: {output_path}")
 
 
 def print_report(
@@ -313,7 +313,7 @@ def print_report(
 ):
     """Druckt ausführlichen Test-Report."""
     
-    # ✅ Extrahiere Metriken aus report
+    #  Extrahiere Metriken aus report
     metrics = report["metrics"]
     cm = report["confusion_matrix"]
     
@@ -321,7 +321,7 @@ def print_report(
     print("🎯 FINAL TEST EVALUATION REPORT")
     print("="*80)
     
-    print(f"\n📊 Test Dataset Statistics:")
+    print(f"\n  Test Dataset Statistics:")
     print(f"   Total samples:      {len(y_test):,}")
     print(f"   Positive cases:     {(y_test==1).sum():,} ({(y_test==1).sum()/len(y_test)*100:.1f}%)")
     print(f"   Negative cases:     {(y_test==0).sum():,} ({(y_test==0).sum()/len(y_test)*100:.1f}%)")
@@ -357,7 +357,7 @@ def print_report(
     print(f"   └──────────────┴──────────────┘")
     print(f"     Actual Neg      Actual Pos")
     
-    print(f"\n📊 Validation vs. Test Performance:")
+    print(f"\n  Validation vs. Test Performance:")
     print(f"   ┌──────────────────┬────────────┬────────────┬────────────┐")
     print(f"   │ Metric           │ Validation │    Test    │    Δ       │")
     print(f"   ├──────────────────┼────────────┼────────────┼────────────┤")
@@ -374,7 +374,7 @@ def print_report(
     
     print(f"\n🔍 Generalization Assessment:")
     if abs(auc_drop) < 0.02 and abs(recall_drop) < 0.05 and abs(spec_drop) < 0.05:
-        print(f"   ✅ EXCELLENT: Model generalizes well to unseen data")
+        print(f"    EXCELLENT: Model generalizes well to unseen data")
     elif abs(auc_drop) < 0.05 and abs(recall_drop) < 0.10 and abs(spec_drop) < 0.10:
         print(f"   ✓  GOOD: Acceptable generalization performance")
     else:
@@ -427,7 +427,7 @@ def main():
     X_test = X[test_idx]
     y_test = y[test_idx]
     
-    print(f"✅ Test set loaded: {len(test_idx):,} samples")
+    print(f" Test set loaded: {len(test_idx):,} samples")
     
     # 3) Lade Modell
     print("\nLoading Model...")
@@ -435,12 +435,12 @@ def main():
     checkpoint = torch.load(training_result["checkpoint"], map_location="cpu")
     model.load_state_dict(checkpoint)
     model.eval()
-    print(f"✅ Model loaded from checkpoint")
+    print(f" Model loaded from checkpoint")
     
-    # 4) ✅ Evaluiere mit FESTEM Threshold aus Training
+    # 4)  Evaluiere mit FESTEM Threshold aus Training
     print("\nEvaluating on Test Set...")
     args.output.mkdir(parents=True, exist_ok=True)
-    report, roc_data = evaluate_on_test(  # ✅ Beides empfangen
+    report, roc_data = evaluate_on_test(  #  Beides empfangen
         model,
         X_test,
         y_test,
@@ -478,7 +478,7 @@ def main():
     )
     
     # 8) Final Summary
-    print(f"✅ Evaluation Complete!")
+    print(f" Evaluation Complete!")
     print(f"\n📁 Results saved to: {args.output}/")
     print(f"   • test_report.json           (all metrics as JSON)")
     print(f"   • test_roc_curve.png         (publication-ready ROC)")
