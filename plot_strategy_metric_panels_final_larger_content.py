@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Plot and analyse per-strategy MCC curves for the IID scaling experiment.
-
+ALT NOCH MIT THRESHOLD
 For each strategy family (FedAdam, FedProx, Scaffold), the script creates one
 clean two-panel figure:
 
