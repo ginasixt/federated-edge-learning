@@ -228,6 +228,8 @@ data/
 
 # 2. Creating IID Scaling Splits
 
+Already created.
+
 ## `make_splits.py`
 
 ```text
