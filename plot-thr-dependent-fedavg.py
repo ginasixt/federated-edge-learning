@@ -50,12 +50,12 @@ Design
 
 Example
 -------
-python plot-thr-dependent-fedprox.py
+python plot-thr-dependent-fedavg.py
 
-python plot-thr-dependent-fedprox.py \
+python plot-thr-dependent-fedavg.py \
     --input result/splits_iid_scaling/final_threshold_analysis/FedProx
 
-python plot-thr-dependent-fedprox.py \
+python plot-thr-dependent-fedavg.py \
     --input result/splits_iid_scaling/final_threshold_analysis/FedProx/all_threshold_results.csv \
     --output-dir result/splits_iid_scaling/final_threshold_analysis/FedProx/apa_figures
 """

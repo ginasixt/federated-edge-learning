@@ -57,10 +57,10 @@ result/splits_iid_scaling/training_dynamics/FedProx/
 
 Example
 -------
-python evaluate-training-dynamics-fedprox.py
+python evaluate-training-dynamics-fedavg.py
 
 To permit an incomplete final-round window while retaining an explicit flag:
-python evaluate-training-dynamics-fedprox.py --allow-incomplete-final-window
+python evaluate-training-dynamics-fedavg.py --allow-incomplete-final-window
 """
 
 from __future__ import annotations

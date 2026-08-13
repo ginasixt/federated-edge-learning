@@ -66,7 +66,7 @@ Additional dependencies are listed in `requirements.txt` and `pyproject.toml`.
 Create and activate a virtual environment:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 ```
 
@@ -176,7 +176,7 @@ Performs the initial dataset preparation and creates the global train, validatio
 Example:
 
 ```bash
-python federated_learning/tools/prepare_data.py \
+python3 federated_learning/tools/prepare_data.py \
     --csv <input.csv> \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json
@@ -197,7 +197,7 @@ Standardizes the input features using statistics calculated from the training su
 Example:
 
 ```bash
-python federated_learning/tools/normalize_and_add_weights.py \
+python3 federated_learning/tools/normalize_and_add_weights.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
     --output data/diabetes_normalized.parquet \
@@ -255,7 +255,7 @@ Creates the client partitions used for the IID scalability study.
 Example:
 
 ```bash
-python federated_learning/tools/create_iid_scaling_splits.py \
+python3 federated_learning/tools/create_iid_scaling_splits.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
     --output-dir splits_iid_scaling \
@@ -575,7 +575,7 @@ After the training runs are complete, the evaluation follows this order:
 Training checkpoints
         │
         ▼
-scaling_evaluation_fedprox.py
+scaling_evaluation_fedavg.py
         │
         │ Validation-based checkpoint selection
         │
@@ -586,35 +586,35 @@ scaling_evaluation_fedprox.py
         ├───────────────────────────────┐
         │                               │
         ▼                               ▼
-final_test_set_eval_fedprox.py   evaluate-thr-dependent-fedprox.py
+final_test_set_eval_fedavg.py   evaluate-thr-dependent-fedavg.py
         │                               │
         ▼                               ▼
 Threshold-independent            Threshold-dependent
 test results                     test results
         │                               │
         ├───────────────┐               ▼
-        ▼               ▼        plot-thr-dependent-fedprox.py
+        ▼               ▼        plot-thr-dependent-fedavg.py
 plot-thr-indep-    table_plot_
-fedprox.py         fedprox.py
+fedavg.py         fedavg.py
 
 
 All saved round checkpoints
         │
         ▼
-evaluate-training-dynamics-fedprox-rounds-70-80.py
+evaluate-training-dynamics-fedavg.py
         │
         ▼
-plot-training-dynamics-fedprox-rounds-70-80.py
+plot-training-dynamics-fedavg.py
 ```
 
 ---
 
 # 6. Validation-Based Checkpoint Selection
 
-## `scaling_evaluation_fedprox.py`
+## `scaling_evaluation_fedavg.py`
 
 ```text
-scaling_evaluation_fedprox.py
+scaling_evaluation_fedavg.py
 ```
 
 This is the **first evaluation step after training**.
@@ -662,10 +662,10 @@ The test set is not used during checkpoint selection.
 
 # 7. Threshold-Independent Final Test Evaluation
 
-## `final_test_set_eval_fedprox.py`
+## `final_test_set_eval_fedavg.py`
 
 ```text
-final_test_set_eval_fedprox.py
+final_test_set_eval_fedavg.py
 ```
 
 Evaluates only the checkpoints that were previously selected using the validation set.
@@ -719,10 +719,10 @@ splits_iid_<N>_clients/
 
 ---
 
-## `plot-thr-indep-fedprox.py`
+## `plot-thr-indep-fedavg.py`
 
 ```text
-plot-thr-indep-fedprox.py
+plot-thr-indep-fedavg.py
 ```
 
 Creates the threshold-independent FedAvg scalability figures from the run-level final test results.
@@ -757,7 +757,7 @@ result/splits_iid_scaling/final_test_set_eval/FedProx/all_test_results.csv
 Run:
 
 ```bash
-python3 plot-thr-indep-fedprox.py
+python3 plot-thr-indep-fedavg.py
 ```
 
 The script writes high-resolution PNG and vector PDF output.
@@ -766,10 +766,10 @@ The script writes high-resolution PNG and vector PDF output.
 
 # 8. Run-to-Run Dispersion
 
-## `table_plot_fedprox.py`
+## `table_plot_fedavg.py`
 
 ```text
-table_plot_fedprox.py
+table_plot_fedavg.py
 ```
 
 Analyzes the variation between the five repeated FedAvg runs at every scaling point.
@@ -802,7 +802,7 @@ using the corresponding validation-selected checkpoints.
 Run:
 
 ```bash
-python table_plot_fedprox.py
+python3 table_plot_fedavg.py
 ```
 
 Important outputs include:
@@ -822,10 +822,10 @@ The resulting dispersion figure is used to describe how strongly repeated runs v
 
 # 9. Threshold-Dependent Evaluation
 
-## `evaluate-thr-dependent-fedprox.py`
+## `evaluate-thr-dependent-fedavg.py`
 
 ```text
-evaluate-thr-dependent-fedprox.py
+evaluate-thr-dependent-fedavg.py
 ```
 
 Evaluates the final models at two validation-selected operating points.
@@ -869,7 +869,7 @@ Among the thresholds satisfying this constraint, the threshold with the highest 
 Run:
 
 ```bash
-python evaluate-thr-dependent-fedprox.py --min-recall 0.80
+python3 evaluate-thr-dependent-fedavg.py --min-recall 0.80
 ```
 
 The combined results are stored under:
@@ -888,13 +888,13 @@ and run-specific JSON result files.
 
 ---
 
-## `plot-thr-dependent-fedprox.py`
+## `plot-thr-dependent-fedavg.py`
 
 ```text
-plot-thr-dependent-fedprox.py
+plot-thr-dependent-fedavg.py
 ```
 
-Creates the threshold-dependent FedAvg figures from the results generated by `evaluate-thr-dependent-fedprox.py`.
+Creates the threshold-dependent FedAvg figures from the results generated by `evaluate-thr-dependent-fedavg.py`.
 
 The plotting script performs **no additional checkpoint or threshold selection**.
 
@@ -924,7 +924,7 @@ Test recall and specificity
 Run:
 
 ```bash
-python3 plot-thr-dependent-fedprox.py
+python3 plot-thr-dependent-fedavg.py
 ```
 
 Default input:
@@ -952,10 +952,10 @@ It does not affect:
 
 ---
 
-## `evaluate-training-dynamics-fedprox.py`
+## `evaluate-training-dynamics-fedavg.py`
 
 ```text
-evaluate-training-dynamics-fedprox.py
+evaluate-training-dynamics-fedavg.py
 ```
 
 Evaluates the saved communication-round checkpoints retrospectively on the test set using Average Precision.
@@ -995,15 +995,15 @@ negative slope    → AP decreasing
 Run:
 
 ```bash
-python3 evaluate-training-dynamics-fedprox.py
+python3 evaluate-training-dynamics-fedavg.py
 ```
 
 ---
 
-## `plot-training-dynamics-fedprox.py`
+## `plot-training-dynamics-fedavg.py`
 
 ```text
-plot-training-dynamics-fedprox.py
+plot-training-dynamics-fedavg.py
 ```
 
 Plots the results from the training-dynamics evaluation.
@@ -1024,7 +1024,7 @@ Small points represent individual runs and the connected markers represent the m
 Run:
 
 ```bash
-python3 plot-training-dynamics-fedprox.py
+python3 plot-training-dynamics-fedavg.py
 ```
 
 ---
@@ -1061,7 +1061,7 @@ A full reproduction of the FedAvg study follows the sequence below.
 ## Step 1 — Prepare the raw dataset
 
 ```bash
-python federated_learning/tools/prepare_data.py \
+python3 federated_learning/tools/prepare_data.py \
     --csv <input.csv> \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json
@@ -1070,7 +1070,7 @@ python federated_learning/tools/prepare_data.py \
 ## Step 2 — Normalize features and calculate class weights
 
 ```bash
-python federated_learning/tools/normalize_and_add_weights.py \
+python3 federated_learning/tools/normalize_and_add_weights.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
     --output data/diabetes_normalized.parquet \
@@ -1080,7 +1080,7 @@ python federated_learning/tools/normalize_and_add_weights.py \
 ## Step 3 — Create the IID client partitions
 
 ```bash
-python federated_learning/tools/create_iid_scaling_splits.py \
+python3 federated_learning/tools/create_iid_scaling_splits.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
     --output-dir splits_iid_scaling \
@@ -1090,7 +1090,7 @@ python federated_learning/tools/create_iid_scaling_splits.py \
 ## Step 4 — Analyze the generated partitions
 
 ```bash
-python analyze_iid_splits_one_row_per_split.py
+python3 analyze_iid_splits_one_row_per_split.py
 ```
 
 ## Step 5 — Run the FedAvg scaling study
@@ -1102,49 +1102,49 @@ python analyze_iid_splits_one_row_per_split.py
 ## Step 6 — Select communication-round checkpoints using validation data
 
 ```bash
-python scaling_evaluation_fedprox.py
+python3 scaling_evaluation_fedavg.py
 ```
 
 ## Step 7 — Perform the final threshold-independent test evaluation
 
 ```bash
-python final_test_set_eval_fedprox.py
+python3 final_test_set_eval_fedavg.py
 ```
 
 ## Step 8 — Generate threshold-independent plots
 
 ```bash
-python plot-thr-indep-fedprox.py
+python3 plot-thr-indep-fedavg.py
 ```
 
 ## Step 9 — Calculate run-to-run dispersion
 
 ```bash
-python table_plot_fedprox.py
+python3 table_plot_fedavg.py
 ```
 
 ## Step 10 — Select operating points on validation and evaluate on test
 
 ```bash
-python evaluate-thr-dependent-fedprox.py --min-recall 0.80
+python3 evaluate-thr-dependent-fedavg.py --min-recall 0.80
 ```
 
 ## Step 11 — Generate threshold-dependent plots
 
 ```bash
-python plot-thr-dependent-fedprox.py
+python3 plot-thr-dependent-fedavg.py
 ```
 
 ## Step 12 — Evaluate training dynamics
 
 ```bash
-python evaluate-training-dynamics-fedprox-rounds-70-80.py
+python3 evaluate-training-dynamics-fedavg.py
 ```
 
 ## Step 13 — Generate the training-dynamics figure
 
 ```bash
-python plot-training-dynamics-fedprox-rounds-70-80.py
+python3 plot-training-dynamics-fedavg.py
 ```
 
 ---
@@ -1180,20 +1180,22 @@ python plot-training-dynamics-fedprox-rounds-70-80.py
 
 | File                                                 | Purpose                                                                                              |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `scaling_evaluation_fedprox.py`                      | Evaluates saved checkpoints on validation and selects the best ROC-AUC, AP and loss checkpoint       |
-| `final_test_set_eval_fedprox.py`                     | Evaluates the validation-selected checkpoints on the fixed final test set                            |
-| `evaluate-thr-dependent-fedprox.py`                  | Selects MCC-optimal and recall-constrained operating points on validation and evaluates them on test |
-| `evaluate-training-dynamics-fedprox-rounds-70-80.py` | Retrospectively evaluates saved checkpoints to characterize convergence behavior                     |
+| `scaling_evaluation_fedavg.py`                      | Evaluates saved checkpoints on validation and selects the best ROC-AUC, AP and loss checkpoint       |
+| `final_test_set_eval_fedavg.py`                     | Evaluates the validation-selected checkpoints on the fixed final test set                            |
+| `evaluate-thr-dependent-fedavg.py`                  | Selects MCC-optimal and recall-constrained operating points on validation and evaluates them on test |
+| `evaluate-training-dynamics-fedavg.py` | Retrospectively evaluates saved checkpoints to characterize convergence behavior                     |
 
 ## Figures and Tables
 
 | File                                             | Purpose                                                     |
 | ------------------------------------------------ | ----------------------------------------------------------- |
-| `plot_strategy_mcc.py`               | Configuration-selection visualization at 16,384 clients     |
-| `plot-thr-indep-fedprox.py`                      | Threshold-independent FedAvg scalability figure             |
-| `table_plot_fedprox.py`                          | Run-to-run dispersion statistics, table and appendix figure |
-| `plot-thr-dependent-fedprox.py`                  | Threshold-dependent FedAvg figures                          |
-| `plot-training-dynamics-fedprox-rounds-70-80.py` | FedAvg training-dynamics appendix figure                    |
+| `plot_strategy_mcc.py`               | Configuration-selection visualization at 16,384 clients for all strategies   |
+| `plot-thr-indep-fedavg.py`                      | Threshold-independent FedAvg scalability figure             |
+| `table_plot_fedavg.py`                          | Run-to-run dispersion statistics, table and appendix figure |
+| `plot-thr-dependent-fedavg.py`                  | Threshold-dependent FedAvg figures                          |
+| `plot-training-dynamics-fedavg.py` | FedAvg training-dynamics appendix figure                 
+| `plot-combined-strategy-comparison.py` | Creates the cross-strategy overview figures comparing FedAvg, SCAFFOLD, and FedAdam for threshold-independent performance and both validation-selected operating points |
+
 
 ---
 
@@ -1273,15 +1275,15 @@ The main output formats are:
 Most evaluation and utility scripts provide command-line help:
 
 ```bash
-python <script>.py --help
+python3 <script>.py --help
 ```
 
 For example:
 
 ```bash
-python federated_learning/tools/create_iid_scaling_splits.py --help
-python evaluate-thr-dependent-fedprox.py --help
-python plot-thr-dependent-fedprox.py --help
+python3 federated_learning/tools/create_iid_scaling_splits.py --help
+python3 evaluate-thr-dependent-fedavg.py --help
+python3 plot-thr-dependent-fedavg.py --help
 ```
 
 ---

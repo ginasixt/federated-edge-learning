@@ -16,7 +16,7 @@ For every scaling point and run, this script:
 
 3. Applies both thresholds unchanged to the centralized test set.
 
-4. Writes one compact file required by plot-thr-dependent-fedprox.py:
+4. Writes one compact file required by plot-thr-dependent-fedavg.py:
        result/splits_iid_scaling/final_threshold_analysis/FedProx/
          all_threshold_results.csv
 
@@ -31,7 +31,7 @@ point, the union is required to match norm_stats.json["val_idx"] exactly.
 
 Example
 -------
-python3 evaluate-thr-dependent-fedprox.py --min-recall 0.80
+python3 evaluate-thr-dependent-fedavg.py --min-recall 0.80
 
 The minimum recall must be chosen before inspecting the threshold-dependent test
 results.
@@ -1221,7 +1221,7 @@ def main() -> None:
     print()
     print("Next step:")
     print(
-        "python3 plot-thr-dependent-fedprox.py "
+        "python3 plot-thr-dependent-fedavg.py "
         f"--input {args.output}"
     )
     print("=" * 84)

@@ -5,7 +5,7 @@ APA-Style FedProx Test-Set Training-Dynamics Figure
 
 This script plots the run-level output created by:
 
-    evaluate-training-dynamics-fedprox.py
+    evaluate-training-dynamics-fedavg.py
 
 Default input
 -------------
@@ -37,7 +37,7 @@ The figure follows the visual language of the supplied FedProx thesis plots:
 
 Example
 -------
-python plot-training-dynamics-fedprox.py
+python plot-training-dynamics-fedavg.py
 """
 
 from __future__ import annotations
@@ -186,7 +186,7 @@ def read_and_validate(
     if not path.is_file():
         raise FileNotFoundError(
             f"Training-dynamics input not found:\n  {path}\n\n"
-            "Run evaluate-training-dynamics-fedprox.py first."
+            "Run evaluate-training-dynamics-fedavg.py first."
         )
 
     frame = pd.read_csv(path)
@@ -270,7 +270,7 @@ def read_and_validate(
         raise ValueError(
             "This plot version expects the late-training window rounds 70-80; "
             f"the CSV contains rounds {int(late_starts[0])}-{int(late_ends[0])}. "
-            "Re-run evaluate-training-dynamics-fedprox-rounds-70-80.py first."
+            "Re-run evaluate-training-dynamics-fedavg.py first."
         )
 
     incomplete = frame[~frame["late_window_complete"]]

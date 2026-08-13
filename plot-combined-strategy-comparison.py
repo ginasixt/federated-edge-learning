@@ -759,7 +759,7 @@ def strategy_legend_handles() -> List[Line2D]:
                 markerfacecolor=style["color"],
                 markeredgecolor="white",
                 markeredgewidth=MARKER_EDGE_WIDTH,
-                label=strategy,
+                label="FedAvg" if strategy == "FedProx" else strategy,
             )
         )
     return handles

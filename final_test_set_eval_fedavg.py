@@ -107,7 +107,7 @@ IN_DIM = 21
 BATCH_SIZE = 256
 
 # These are the three validation-based checkpoint selection criteria produced
-# by scaling_eval_fedprox.py.
+# by scaling_eval_fedavg.py.
 SELECTION_METRICS: Tuple[str, ...] = ("ROC", "PRROC", "Loss")
 
 SCALING_POINTS: List[int] = [

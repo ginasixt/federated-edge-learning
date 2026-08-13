@@ -8,7 +8,7 @@ Default usage
 -------------
 Run from the project root:
 
-    python table_plot_fedprox.py
+    python table_plot_fedavg.py
 
 Default input:
     result/splits_iid_scaling/final_test_set_eval/FedProx/all_test_results.csv
@@ -176,7 +176,7 @@ def read_and_prepare(path: Path, strategy: str) -> Tuple[str, pd.DataFrame]:
         raise FileNotFoundError(
             f"Input file not found:\n  {path}\n\n"
             "Run the script from the project root or provide another input:\n"
-            "  python table_plot_fedprox.py --input PATH/TO/FILE.csv"
+            "  python table_plot_fedavg.py --input PATH/TO/FILE.csv"
         )
 
     data = pd.read_csv(path)

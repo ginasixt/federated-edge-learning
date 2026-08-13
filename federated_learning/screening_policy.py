@@ -1,6 +1,6 @@
 """
 ScreeningPolicy for imbalanced Federated Learning.
-
+OLD CODE
 Design principles:
 - Works with the actual data format: metrics = {auc: ..., all_thresholds: [...]}
 - Selects an optimal threshold per round (configurable strategy)
