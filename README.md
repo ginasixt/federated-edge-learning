@@ -1,356 +1,1472 @@
-# Diabetes Prediction with Federated Learning using Flower & PyTorch
-This project uses a Multilayer Perceptron (MLP) built with PyTorch to predict diabetes based on health indicators in a federated learning setting. 
-The model is trained on the [Diabetes Health Indicators Dataset](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset) dataset and orchestrated using [Flower](https://flower.ai/).
+# Federated Edge Learning — FedAdam Scalability Study
 
-The dataset has **253,680 samples** from CDC survey, **21 health indicators** like BMI, age, blood pressure, cholesterol, etc. and is highly **Imbalanced**: 86.1% healthy, 13.9% at-risk.
+This repository contains the experimental code for the **FedAdam scalability study** conducted as part of a bachelor thesis on federated edge learning for diabetes screening.
 
-By splitting the dataset across clients, we simulate a real-world federated learning scenario where data remains decentralized.\
-Each client:
-- Holds a subset of the full dataset
-- Trains the MLP model locally using PyTorch \
-  -> Want to learn more about my work and insights with MLPs? \
-  Check out my other Repo:  [Multilayer Perceptron](https://github.com/ginasixt/Multilayer-Perceptron.git).
-- Sends only the updated model weights back to the central server
-- Keeps all raw data private and local
+The implementation uses **PyTorch** for model training and **Flower (FLwr)** for federated orchestration and simulation.
 
-In real-world federated learning (also called "cross-silo"), this data is already distributed across organizations, there's no need to split the data artificially.
+The central experiment investigates how federated learning behaves when a **fixed global training dataset is distributed across an increasing number of clients**. Increasing the number of clients therefore does not add training data, but progressively fragments the same dataset into smaller local client datasets.
 
+The final FedAdam scalability study evaluates:
 
----
+```text
+2, 4, 8, 16, 32, 64, 128, 256, 512,
+1,024, 2,048, 4,096, 8,192, 16,384, 32,768 clients
+```
 
-## Table of Contents
+Each scaling point is repeated **five times**.
 
-- [Installation](#-installation)
-- [Project Architecture](#-project-architecture)
-- [Model Architecture](#-model-architecture)
-- [Training Process](#-training-process)
-- [Multi-Threshold Optimization](#-multi-threshold-optimization)
-- [Screening Policy](#-screening-policy)
-- [Results & Visualizations](#-results--visualizations)
-- [Configuration](#-configuration)
-- [References](#-references)
-
+FedAdam differs from FedAvg primarily through its adaptive **server-side optimization**. Clients perform local model training, while the server uses first- and second-moment estimates of the aggregated client updates to determine the global update.
 
 ---
 
-## Installation
+# 1. Requirements and Installation
 
+A Python virtual environment is recommended.
 
-## Quick Start
-
-### Prepare Data
+Create and activate the environment:
 
 ```bash
-# Download dataset from Kaggle and create train/val/test splits
-python federated_learning/tools/prepare_data.py \
-    --csv diabetes_binary_health_indicators_BRFSS2015.csv \
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install the required packages:
+
+```bash
+pip install -U pip
+pip install -r requirements.txt
+```
+
+The main project dependencies include Flower, PyTorch, NumPy, pandas, scikit-learn, matplotlib, and PyArrow.
+
+The Flower application and experiment configuration are defined in:
+
+```text
+pyproject.toml
+```
+
+---
+
+# 2. Overall Workflow
+
+The final FedAdam experiment follows this workflow:
+
+```text
+Raw BRFSS dataset
+        │
+        ▼
+prepare_data.py
+        │
+        ▼
+Fixed train / validation / test split
+        │
+        ▼
+normalize_and_add_weights.py
+        │
+        ▼
+Normalized dataset + class weights
+        │
+        ▼
+create_iid_scaling_splits.py
+        │
+        ▼
+IID client partitions
+        │
+        ▼
+adjust_val_distribution.py
+        │
+        ▼
+Centralized validation mapping
+        │
+        ▼
+FedAdam training
+client_app.py + server_app.py + task.py
+        │
+        ▼
+Saved model checkpoint for each communication round
+        │
+        ▼
+scaling_eval.py
+        │
+        ▼
+Validation-based checkpoint selection
+   ├── bestROC
+   ├── bestPRROC
+   └── bestLoss
+        │
+        ▼
+final_test_set_eval.py
+        │
+        ▼
+Final threshold-independent test results
+        │
+        ├── plot-thr-indep.py
+        └── table_plot.py
+```
+
+Two additional analyses branch from the saved results.
+
+Threshold-dependent evaluation:
+
+```text
+bestPRROC checkpoint
+        │
+        ▼
+evaluate-thr-dependent-fedadam.py
+        │
+        ▼
+Threshold selection on validation
+   ├── MCC-optimal threshold
+   └── Recall ≥ 0.80, then maximum specificity
+        │
+        ▼
+Apply selected threshold unchanged to test
+        │
+        ▼
+plot-thr-dependent-fedadam.py
+```
+
+Training-dynamics analysis:
+
+```text
+Saved checkpoint from each communication round
+        │
+        ▼
+evaluate-training-dynamics-fedadam.py
+        │
+        ▼
+Validation AP across communication rounds
+   ├── First evaluated round reaching 99% of best validation AP
+   └── Late-training validation-AP slope
+        │
+        ▼
+plot-training-dynamics-fedadam.py
+```
+
+The validation set is used for checkpoint and threshold selection. The test set is not used to select models, communication rounds, thresholds, or hyperparameters.
+
+---
+
+# 3. Core Federated Learning Components
+
+## `server_app.py`
+
+```text
+federated_learning/server_app.py
+```
+
+Defines the Flower server application and the FedAdam strategy.
+
+The custom strategy extends Flower's `FedAdam` implementation. After receiving the locally trained client models, the server performs the FedAdam server-side optimization step.
+
+The server is also responsible for:
+
+* coordinating the participating clients,
+* maintaining the global model,
+* applying the FedAdam server optimizer,
+* performing centralized validation,
+* saving model checkpoints,
+* storing validation metrics for the communication rounds.
+
+The FedAdam-specific server parameters are read from the Flower run configuration:
+
+```text
+eta
+eta-l
+beta-1
+beta-2
+tau
+```
+
+where:
+
+* `eta` is the server learning rate,
+* `eta-l` is the FedAdam client learning-rate parameter,
+* `beta-1` controls the first-moment estimate,
+* `beta-2` controls the second-moment estimate,
+* `tau` is the FedAdam stability parameter.
+
+The corresponding values are configured in `pyproject.toml`.
+
+The server loads the complete validation set using the `centralized_val_row_ids` stored in the active split file. Validation is therefore performed directly on the server rather than by aggregating client-side validation results.
+
+Each communication-round model is stored as a PyTorch checkpoint, for example:
+
+```text
+result/splits_iid_scaling/
+└── splits_iid_4096_clients.json/
+    └── FedAdam/
+        └── all_rounds_run_1/
+            ├── model_round_1_run_1.pt
+            ├── model_round_2_run_1.pt
+            ├── ...
+            └── model_round_45_run_1.pt
+```
+
+These checkpoints are later used for validation-based checkpoint selection and the retrospective training-dynamics analysis.
+
+---
+
+## `client_app.py`
+
+```text
+federated_learning/client_app.py
+```
+
+Defines the Flower client application, neural network, and local training procedure.
+
+For every selected client, the client:
+
+1. receives the current global model,
+2. loads its assigned local training observations,
+3. performs the configured local training,
+4. returns the updated model parameters to the server.
+
+The neural network is a multilayer perceptron for binary diabetes classification.
+
+Local optimization parameters such as the learning rate, learning-rate schedule, weight decay, gradient clipping, batch size, and number of local epochs are configured through `pyproject.toml`.
+
+FedAdam itself is applied on the **server side**. The client-side training therefore produces the local model updates on which the server subsequently performs adaptive FedAdam optimization.
+
+---
+
+## `task.py`
+
+```text
+federated_learning/task.py
+```
+
+Contains the data-loading utilities used by the Flower clients and the centralized validation procedure.
+
+`load_client_data()` loads only the row IDs assigned to the respective client from:
+
+```text
+data/diabetes_normalized.parquet
+```
+
+The Parquet file is already normalized before training, so no additional feature normalization is performed during client training.
+
+Class weights are loaded from:
+
+```text
+data/norm_stats.json
+```
+
+using the precomputed:
+
+```text
+neg_weight
+pos_weight
+```
+
+The file also provides:
+
+```text
+load_centralized_val(...)
+```
+
+which is used by the server and later validation-based evaluation scripts to load the complete centralized validation set.
+
+---
+
+# 4. Data Preparation
+
+## `prepare_data.py`
+
+```text
+federated_learning/tools/prepare_data.py
+```
+
+Prepares the BRFSS 2015 diabetes dataset and creates the fixed global train, validation, and test partition.
+
+The default proportions are:
+
+```text
+Training:    70%
+Validation:  10%
+Test:        20%
+```
+
+The split is stratified by the binary target variable.
+
+The script stores stable row IDs so that the same observations remain in the global train, validation, and test sets throughout all scaling experiments.
+
+Run:
+
+```bash
+python3 federated_learning/tools/prepare_data.py \
+    --csv data/diabetes.csv \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json
 ```
 
-**Output:**
-- `data/diabetes.parquet`: Normalized features + row IDs
-- `data/norm_stats.json`: Mean/std for normalization + split indices
+The current implementation obtains the BRFSS dataset through `kagglehub`; the `--csv` argument is retained by the command-line interface.
 
-**Why Normalization?**
-- Features have different scales (e.g., Age: 1-13, BMI: 12-98)
-- Neural networks converge faster with normalized inputs
-- Prevents features with large values from dominating
+Outputs:
 
-**Split Distribution:**
-- Train: 70% (177,576 samples) -> Distributed across 10 clients (simulates 10 hospitals)
-- Validation: 10% (25,368 samples) -> for training hyperparameter like threshold selection without test set contamination
-- Test: 20% (50,736 samples) -> Global Dataset (centralized Evaluation)
+```text
+data/diabetes.parquet
+data/norm_stats.json
+```
 
-### Create Client Partitions
+`norm_stats.json` contains, among other information:
+
+```text
+train_idx
+val_idx
+test_idx
+mean
+std
+target
+```
+
+The normalization statistics are calculated using only the training subset.
+
+---
+
+## `normalize_and_add_weights.py`
+
+```text
+federated_learning/tools/normalize_and_add_weights.py
+```
+
+Normalizes the prepared dataset and calculates the class weights used during training.
+
+Run:
 
 ```bash
-# Non-IID split using Dirichlet distribution (α=0.3)
-python federated_learning/tools/make_splits.py \
+python3 federated_learning/tools/normalize_and_add_weights.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
-    --out splits_dirichlet_10_a03.json \
-    --num-partitions 10 \
-    --mode dirichlet \
-    --alpha 0.3
+    --output data/diabetes_normalized.parquet \
+    --pos-weight-boost 1.5
 ```
 
-**Output:** `splits_dirichlet_10_a03.json`
-```json
-{
-  "train": {
-    "0": [12, 45, 78, ...],  // Client 0's training sample IDs
-    "1": [23, 56, 89, ...],
-    ...
-  },
-  "val": {
-    "0": [105, 234, ...],    // Proportional validation split
-    "1": [67, 189, ...],
-    ...
-  }
-}
+The script:
+
+1. loads the existing train/validation/test split,
+2. normalizes the features using the training-set mean and standard deviation,
+3. writes the normalized dataset,
+4. calculates class weights from the global training subset,
+5. applies the positive-class boost,
+6. stores the resulting weights in `norm_stats.json`.
+
+It does **not** create a new train/validation/test split.
+
+Output:
+
+```text
+data/diabetes_normalized.parquet
 ```
 
-**Dirichlet α Parameter:**
-- `α=0.1`: Highly non-IID (e.g., Hospital A: 90% elderly, Hospital B: 90% young)
-- `α=0.3`: Moderate heterogeneity (realistic)
-- `α=1.0`: Mild non-IID
+and additional entries in `norm_stats.json`, including:
 
-### Run Federated Training
+```text
+pos_weight
+neg_weight
+train_pos_count
+train_neg_count
+pos_weight_boost
+```
+
+---
+
+# 5. Creating the IID Scaling Partitions
+
+## `make_splits.py`
+
+```text
+federated_learning/tools/make_splits.py
+```
+
+Contains general helper functions for client partitioning.
+
+The final scalability experiment uses its IID partitioning functionality.
+
+Other partitioning functionality contained in the file is not required for reproducing the final FedAdam scalability study.
+
+---
+
+## `create_iid_scaling_splits.py`
+
+```text
+federated_learning/tools/create_iid_scaling_splits.py
+```
+
+Creates the client partitions used in the final scalability study.
+
+Run:
 
 ```bash
-# Train for 20 rounds with 10 clients
-flwr run
-```
-
-**What happens then:**
-1. **Server** initializes global model (random weights)
-2. **Each Round:**
-   - Server samples 8/10 clients for training
-   - Clients download global model
-   - Clients train locally for 1 epoch
-   - Clients upload weight updates
-   - Server aggregates using FedAvg
-   - All 10 clients evaluate on local validation data (10 thresholds each)
-   - Server selects best threshold based on aggregated metrics
-3. **After 20 Rounds:**
-   - Screening policy selects best model
-   - Checkpoint saved to `result/alpha03/multi_thr/model_round_X.pt`
-   - Metrics saved to `result/alpha03/multi_thr/run_1.json`
-
-**Training Output (Console):**
-```
- Round 1/20
-  ├─ Training: 8 clients selected
-  ├─ Aggregating weights...
-  ├─ Evaluating: 10 thresholds tested
-  └─ Best Threshold: 0.45 (Recall=0.78, Spec=0.72, F1=0.42)
-
- Round 5/20
-  ├─ Training: 8 clients selected
-  ├─ Aggregating weights...
-  ├─ Evaluating: 10 thresholds tested
-  └─ Best Threshold: 0.50 (Recall=0.79, Spec=0.70, F1=0.43)
-  NEW BEST ROUND - Saving checkpoint...
-
-...
-
- Final Summary:
-   Best Round: 5
-   AUC: 0.8223
-   Recall: 0.7847
-   Specificity: 0.7029
-   Threshold: 0.55 (from validation)
-```
-
-### Evaluate on Test Set
-
-```bash
-python federated_learning/tools/final_test_evaluation_with_val_threshold.py \
-    --result-json result/alpha03/multi_thr/run_1.json \
+python3 federated_learning/tools/create_iid_scaling_splits.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
-    --output final_evaluation
+    --output-dir splits_iid_scaling \
+    --seed 123
 ```
 
-**Output Files:**
-- `final_evaluation/test_report.json`: All metrics (AUC, confusion matrix, etc.)
-- `final_evaluation/test_roc_curve.png`: Publication-ready ROC plot
-- `final_evaluation/test_confusion_matrix.png`: Annotated confusion matrix
-- `final_evaluation/test_roc_data.npz`: Raw ROC data (for reproducibility)
+The fixed global training dataset is randomly and approximately evenly distributed across increasing numbers of clients.
 
-### Generate Plots
+Importantly, **labels are not used when assigning training observations to clients**. Label information is only inspected afterwards to describe the resulting local class distributions.
+
+For the final FedAdam study, the relevant scaling points are:
+
+```text
+2
+4
+8
+16
+32
+64
+128
+256
+512
+1,024
+2,048
+4,096
+8,192
+16,384
+32,768
+```
+
+The corresponding files follow the naming convention:
+
+```text
+splits_iid_scaling/
+├── splits_iid_2_clients.json
+├── splits_iid_4_clients.json
+├── splits_iid_8_clients.json
+├── ...
+├── splits_iid_16384_clients.json
+└── splits_iid_32768_clients.json
+```
+
+The global amount of training data remains constant across these files. Only the number and size of the local client datasets changes.
+
+---
+
+## `analyze_client_label_distribution.py`
+
+```text
+federated_learning/tools/analyze_client_label_distribution.py
+```
+
+Provides a descriptive analysis of the generated client partitions.
+
+It can be used to inspect quantities such as:
+
+* number of samples per client,
+* positive samples per client,
+* local positive-class proportions,
+* variation in local class composition,
+* clients containing no positive observations.
+
+This script is an analysis utility and is not required to start the federated training.
+
+---
+
+# 6. Centralized Validation Mapping
+
+## `adjust_val_distribution.py`
+
+```text
+adjust_val_distribution.py
+```
+
+Modifies the generated split files so that the full validation set is available through a centralized validation mapping.
+
+The adjusted files contain:
+
+```text
+centralized_val_row_ids
+```
+
+which are used by the FedAdam server and by the later validation-based evaluation scripts.
+
+This avoids distributing the complete validation procedure across thousands of simulated clients and substantially reduces evaluation overhead.
+
+Run:
 
 ```bash
-python plot_results.py \
-    --root result \
-    --out plots_out_03
+python3 adjust_val_distribution.py
 ```
 
-**Output**: 10+ plots analyzing performance across thresholds and α values
+This step should be performed before training if the generated split files do not yet contain `centralized_val_row_ids`.
 
 ---
 
-## Project Architecture
+# 7. Configuring FedAdam
 
-### Directory Structure
+The main experiment configuration is stored in:
 
+```text
+pyproject.toml
 ```
-federated-diabetes-screening/
-│
-├── federated_learning/          # Core package
-│   ├── __init__.py
-│   ├── client_app.py               # Client training logic
-│   ├── server_app.py               # Aggregation strategy
-│   ├── task.py                     # Data loading utilities
-│   ├── screening_policy.py         # Best round selection
-│   │
-│   ├── tools/                   # Data preparation scripts
-│   │   ├── prepare_data.py         # Train/val/test split + normalization
-│   │   ├── make_splits.py          # Dirichlet partitioning
-│   │   └── final_test_evaluation_with_val_threshold.py # for evaluation of the best round with the test set
-│   │
-│   └── plotting/                # Visualization tools
-│       ├── compare_thresholds_report.py
-│       ├── more_screening_plots.py
-│       └── plot_centralized_roc.py
-│
-├── data/                        # Prepared datasets
-│   ├── diabetes.parquet            # Normalized features
-│   ├── norm_stats.json             # Mean/std + split indices
-│   └── splits_dirichlet_10_a03.json
-│
-├── final_evaluation/            # Test set results
-│   ├── test_report.json
-│   ├── test_roc_curve.png
-│   └── test_confusion_matrix.png
-│
-├── pyproject.toml                  # Project config + dependencies
-└── README.md                       # This file
+
+The Flower application entry points connect the project to:
+
+```text
+federated_learning.server_app
+federated_learning.client_app
+```
+
+The main experiment parameters can be changed under:
+
+```toml
+[tool.flwr.app.config]
+```
+
+Relevant parameters include:
+
+```text
+num-server-rounds
+fraction-fit
+min-fit-clients
+min-available-clients
+local-epochs
+
+batch-size
+lr
+weight-decay
+clip-grad-norm
+pos-weight-boost
+
+eta
+eta-l
+beta-1
+beta-2
+tau
+
+prepared-parquet
+norm-stats-json
+split-path
+run-tag
+```
+
+The final FedAdam scalability study uses:
+
+```text
+Communication rounds:       45
+Target client participation: 0.80
+Repeated runs:               5
+Scaling range:               2–32,768 clients
+Positive-class boost:        1.5
+```
+
+At the two-client scaling point, both clients participate. For larger client configurations, the target participation fraction is converted to a whole number of clients.
+
+The selected FedAdam configuration uses the following client-side learning-rate schedule:
+
+```text
+Rounds 1–8:
+linear warm-up from 1e-3 to 5e-2
+
+Rounds 9–39:
+constant at 5e-2
+
+Rounds 40–45:
+cosine-annealing cool-down from 5e-2 to 2e-2
+```
+
+The selected server-side FedAdam settings are:
+
+```text
+eta     = 0.1
+eta-l   = 0.1
+beta-1  = 0.9
+beta-2  = 0.99
+tau     = 1e-3
+```
+
+with:
+
+```text
+weight decay          = 5e-4
+gradient clipping     = 4.0
+positive-class boost  = 1.5
+```
+
+The configuration used for an actual run is always determined by the values in `pyproject.toml` together with any values explicitly overridden through Flower's `--run-config`.
+
+---
+
+## Ray Simulation Settings
+
+The simulation backend is also configured in `pyproject.toml`.
+
+Typical settings include:
+
+```text
+options.num-supernodes
+num_cpus
+options.backend.client-resources.num-cpus
+options.backend.client-resources.num-gpus
+options.backend.max-workers
+```
+
+These parameters control simulation parallelism and resource allocation.
+
+They do **not** change the conceptual number of participating federated clients. For example, thousands of simulated clients may participate in a communication round while only a smaller number are executed concurrently by Ray.
+
+---
+
+# 8. Starting FedAdam Training
+
+There are two ways to start the training.
+
+## Single Experiment
+
+To run one experiment using the current settings in `pyproject.toml`:
+
+```bash
+flwr run .
+```
+
+This is useful for individual runs, configuration tests, and debugging.
+
+Before starting, check at least:
+
+```text
+split-path
+options.num-supernodes
+num-server-rounds
+fraction-fit
+local optimization settings
+FedAdam server parameters
+run-tag
 ```
 
 ---
 
+## Scaling Study
 
-## Model Architecture
+The automated scaling launcher is:
 
-### Multi-Layer Perceptron (MLP)
-
-```python
-MLP(
-  (net): Sequential(
-    (0): Linear(in_features=21, out_features=256)
-    (1): ReLU()
-    (2): Linear(in_features=256, out_features=128)
-    (3): ReLU()
-    (4): Linear(in_features=128, out_features=2)  # Binary classification
-  )
-)
+```text
+federated_learning/tools/run_iid_scaling.sh
 ```
 
-**Parameters**: 59,650 (trainable)
+Run:
 
-**Design Choices:**
+```bash
+./federated_learning/tools/run_iid_scaling.sh
+```
 
-| Component | Choice | Justification |
-|-----------|--------|---------------|
-| **Input Dim** | 21 | Number of health indicators |
-| **Hidden Layers** | [256, 128] | Sufficient capacity for tabular data |
-| **Activation** | ReLU | Fast, prevents vanishing gradients |
-| **Output** | 2 logits | Softmax for class probabilities |
-| **Initialization** | Kaiming Normal | Optimal for ReLU networks |
-| **Dropout** | None | Implicit regularization via FedAvg |
+If the script is not executable:
 
+```bash
+chmod +x federated_learning/tools/run_iid_scaling.sh
+```
 
-## Training Process
+The launcher is used to run several client configurations and repeated runs automatically.
 
-Our federated learning system employs several techniques to handle the challenges of of medical AI: 
-- severe class imbalance (86% healthy vs 14% diabetic)
-- heterogeneous client data
-- and the need for high recall in clinical screening.
+Its main responsibilities are:
+
+1. iterate over the requested client counts,
+2. select the corresponding IID split file,
+3. set the simulated number of clients,
+4. determine the required number of participating clients,
+5. assign a run identifier,
+6. start Flower with the corresponding `--run-config`,
+7. store logs,
+8. stop remaining Ray processes between experiments.
+
+For the complete final FedAdam study, the client-count list should contain:
+
+```bash
+CLIENT_COUNTS=(2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768)
+```
+
+and:
+
+```bash
+RUNS_PER_SPLIT=5
+```
+
+The selected split for `N` clients follows:
+
+```text
+splits_iid_scaling/splits_iid_<N>_clients.json
+```
+
+For example:
+
+```text
+splits_iid_scaling/splits_iid_4096_clients.json
+```
+
+The launcher can pass values such as:
+
+```text
+split-path
+min-fit-clients
+min-available-clients
+num-server-rounds
+run-tag
+```
+
+through Flower's `--run-config`.
+
+These values override the corresponding defaults in `pyproject.toml` for that run.
 
 ---
 
-### Class Weighting (Weighted Cross-Entropy)
-- Standard training would produce a model that predicts "healthy" for everyone, achieving 86% accuracy but missing all diabetic cases
-- We apply weighted Cross-Entropy loss using global prevalence statistics. The positive class (diabetic) receives significantly higher weight than the negative class (healthy), forcing the model to prioritize recall over overall accuracy. 
-- The class weights are computed from the full training set (not client-local - in real FL enviroment each client should send the aggregated count to the server, the sever computes global prevalence and broadcasts class weights, so that the raw patient data never leaves the client)
-- The boost factor is configurable (default 2.0) via TOML.
+## Running in the Background
 
-### Federated Averaging (FedAvg)
-- Each round, the server samples 80% of clients (8 out of 10) for training while all clients participate in evaluation. Client updates are aggregated using data-size-weighted averaging, giving larger hospitals proportionally more influence.
-- Implemented by the Flower strategy, wrapped in our custom class `federated_learning.server_app.FedAvgWithScreening`.
-- Why: FedAvg is simple, robust, and effective for cross-silo FL. Weighting by local sample counts balances influence across heterogeneous clients and speeds convergence.
+For long simulations on a remote machine:
 
-### FedProx for Non-IID Stability
-- Non-IID data distributions cause "client drift", clients with different patient demographics can push model updates in conflicting directions, leading to oscillating convergence.
-- We add a proximal regularization term that penalizes large deviations from the global model during local training. This keeps client updates within a reasonable neighborhood of the global optimum while preserving local adaptation capability.
-- The proximal coefficient (μ = 0.001) provides mild regularization without over-constraining local learning, improving stability by ~15-20% in our non-IID experiments.
+```bash
+nohup ./federated_learning/tools/run_iid_scaling.sh &
+```
 
-### Adaptive Learning Rate Schedule  
+Logs can be inspected with:
 
-**Strategy**: Two-phase learning rate schedule optimized for short federated runs:
-- **Phase 1 (Rounds 1-2)**: High learning rate (0.01) for rapid exploration of parameter space
-- **Phase 2 (Rounds 3-20)**: Reduced learning rate (0.005) for careful refinement around promising solutions
+```bash
+tail -f nohup.out
+```
 
-Early rounds benefit from aggressive updates to quickly escape poor local minima, while later rounds require stability to converge on optimal parameters without overshooting.
-
-### Gradient Clipping for Stability
-- Non-IID client data can produce rare gradient spikes that destabilize training. We clip gradients to a maximum L2 norm (5.0) to prevent exploding gradients while preserving gradient direction.
-- Essential for training stability when combined with class weighting, which amplifies gradients for minority class examples. Prevents training failures from outlier batches without slowing normal convergence.
-
-### Weight Decay Regularization
-L2 penalty (λ = 1e-4) applied via optimizer weight decay, equivalent to adding a regularization term that shrinks parameters toward zero.
-- Prevents overfitting to small client datasets
-- Encourages simpler model hypotheses that transfer better across clients
-- Reduces parameter variance in federated settings where clients see different data distributions
-
-### Additional Training Optimizations
-
-**SGD with Momentum**: We use SGD with 0.9 momentum rather than adaptive optimizers (Adam, AdaGrad), as momentum-based methods are more robust to the noise and heterogeneity inherent in federated learning.
-
-**Single Local Epoch**: Each client trains for exactly one epoch per round - a federated learning best practice that prevents overfitting to local data while maintaining update diversity across clients.
-
-**Kaiming Initialization**: Hidden layers use Kaiming Normal initialization optimized for ReLU activations, ensuring stable gradient flow from the start of training.
-
-**Multi-threshold validation** and screening policy
-Each client evaluates a grid of thresholds on its validation split. The server aggregates confusion-matrix counts per threshold and selects the best threshold using a clinically motivated composite score and tracks history.
-Screening requires prioritizing recall while maintaining acceptable specificity and stability. Threshold selection on validation (not test) prevents leakage and simulates realistic deployment.
-At the end of the run we evaluate the best round (best metrics according to screening policy) with the test data set.
-
-We select the best threshold by:
-
-**Hard Constraints:**
-- **Recall ≥ 0.75**: Safety requirement (must catch 75%+ of diabetic patients)
-
-**Soft Preferences:**
-- **Specificity ≥ 0.70**: Avoid overwhelming follow-up capacity
-- **F1 Score**: Overall balance
-- **Stability**: Prefer thresholds that work across clients
-
-**Fallback Strategy:**
-If no threshold meets min_recall:
-1. Try relaxed recall (0.70) + spec (0.65)
-2. Use Youden's Index: `J = recall + spec - 1`
-3. Log warning for manual review
+or through the run-specific log files produced by the launcher.
 
 ---
 
-## Screening Policy
-bla bla bla
+# 9. Validation-Based Checkpoint Selection
 
-### Pareto Optimality
+## `scaling_eval.py`
 
-**Definition**: Round A dominates Round B if:
-- `recall(A) ≥ recall(B)` **AND**
-- `spec(A) ≥ spec(B)` **AND**
-- At least one inequality is strict
-
-**Example:**
-```
-Round 5:  Recall=0.785, Spec=0.729  ← Pareto-optimal
-Round 10: Recall=0.790, Spec=0.706  ← Pareto-optimal (higher recall, lower spec)
-Round 8:  Recall=0.780, Spec=0.720  ← Dominated by Round 5
+```text
+scaling_eval.py
 ```
 
-### Stability Score
-Late rounds might overfit to validation data, we adress this too with the stability score
+This is the first evaluation step after all required training runs have completed.
 
+During training, a model checkpoint is saved for each communication round.
 
+`scaling_eval.py` retrospectively evaluates these saved checkpoints on the complete centralized validation set.
 
-## Run with the Deployment Engine
+For every scaling point and repeated run, three checkpoints are selected independently:
 
-Follow this [how-to guide](https://flower.ai/docs/framework/how-to-run-flower-with-deployment-engine.html) to run the same app in this example but with Flower's Deployment Engine. After that, you might be interested in setting up [secure TLS-enabled communications](https://flower.ai/docs/framework/how-to-enable-tls-connections.html) and [SuperNode authentication](https://flower.ai/docs/framework/how-to-authenticate-supernodes.html) in your federation.
+```text
+bestROC
+    checkpoint with the highest validation ROC-AUC
 
-You can run Flower on Docker too! Check out the [Flower with Docker](https://flower.ai/docs/framework/docker/index.html) documentation.
+bestPRROC
+    checkpoint with the highest validation Average Precision
 
+bestLoss
+    checkpoint with the lowest weighted validation loss
+```
 
-## Resources
+The resulting structure is:
 
-- Flower website: [flower.ai](https://flower.ai/)
-- Check the documentation: [flower.ai/docs](https://flower.ai/docs/)
-- Give Flower a ⭐️ on GitHub: [GitHub](https://github.com/adap/flower)
-- Join the Flower community!
-  - [Flower Slack](https://flower.ai/join-slack/)
-  - [Flower Discuss](https://discuss.flower.ai/)
+```text
+result/splits_iid_scaling/
+└── splits_iid_<N>_clients.json/
+    └── FedAdam/
+        ├── bestROC/
+        │   ├── run_1/
+        │   ├── ...
+        │   └── run_5/
+        │
+        ├── bestPRROC/
+        │   ├── run_1/
+        │   ├── ...
+        │   └── run_5/
+        │
+        └── bestLoss/
+            ├── run_1/
+            ├── ...
+            └── run_5/
+```
 
+Checkpoint selection is based exclusively on validation performance.
+
+The test set is not used during this step.
+
+Run:
+
+```bash
+python3 scaling_eval.py
+```
+
+---
+
+# 10. Final Threshold-Independent Test Evaluation
+
+## `final_test_set_eval.py`
+
+```text
+final_test_set_eval.py
+```
+
+Evaluates **only the checkpoints that have already been selected on the centralized validation set**.
+
+The three selection categories are:
+
+```text
+bestROC
+bestPRROC
+bestLoss
+```
+
+For each selected checkpoint, the script evaluates performance on the fixed centralized test set.
+
+It calculates:
+
+* weighted cross-entropy loss,
+* ROC-AUC,
+* Average Precision,
+* ROC curve,
+* precision-recall curve,
+* test-set class counts,
+* test-set prevalence,
+* checkpoint and validation-selection provenance.
+
+No model, communication round, threshold, or hyperparameter is selected on the test set.
+
+Run:
+
+```bash
+python3 final_test_set_eval.py
+```
+
+The main output directory is:
+
+```text
+result/splits_iid_scaling/final_test_set_eval/FedAdam/
+```
+
+Important combined outputs include:
+
+```text
+all_test_results.csv
+all_test_aggregate.csv
+final_test_summary.json
+test_set_info.json
+```
+
+Run-specific outputs include:
+
+```text
+test_metrics.json
+test_curves.json
+```
+
+---
+
+# 11. Threshold-Independent Figures
+
+## `plot-thr-indep.py`
+
+```text
+plot-thr-indep.py
+```
+
+Creates the final threshold-independent FedAdam scalability figures from:
+
+```text
+result/splits_iid_scaling/final_test_set_eval/FedAdam/
+    all_test_results.csv
+```
+
+The main absolute-performance figure contains:
+
+```text
+Panel A: ROC-AUC
+Panel B: Average Precision
+Panel C: Weighted loss
+```
+
+The checkpoint-selection criterion is matched to the reported metric:
+
+```text
+ROC-AUC       → bestROC
+AP            → bestPRROC
+Weighted loss → bestLoss
+```
+
+The plot shows the repeated runs together with the point-specific mean.
+
+Run:
+
+```bash
+python3 plot-thr-indep.py
+```
+
+The script also supports additional visualizations such as relative change from the two-client baseline and run-to-run stability.
+
+---
+
+# 12. Run-to-Run Dispersion
+
+## `table_plot.py`
+
+```text
+table_plot.py
+```
+
+Calculates run-to-run dispersion for the threshold-independent FedAdam results.
+
+Input:
+
+```text
+result/splits_iid_scaling/final_test_set_eval/FedAdam/
+    all_test_results.csv
+```
+
+For every scaling point, statistics are calculated across the five repeated runs for:
+
+```text
+ROC-AUC
+Average Precision
+Weighted loss
+```
+
+using the corresponding validation-selected checkpoint category.
+
+The outputs include:
+
+```text
+run_dispersion_table.csv
+run_dispersion_summary_full.csv
+run_dispersion_table.md
+run_dispersion_text_summary.txt
+run_dispersion_by_scaling.csv
+
+table_run_to_run_dispersion.pdf
+table_run_to_run_dispersion.png
+
+figure_run_to_run_dispersion_by_scaling.pdf
+figure_run_to_run_dispersion_by_scaling.png
+```
+
+Run:
+
+```bash
+python3 table_plot.py
+```
+
+---
+
+# 13. Threshold-Dependent Evaluation
+
+## `evaluate-thr-dependent-fedadam.py`
+
+```text
+evaluate-thr-dependent-fedadam.py
+```
+
+The threshold-dependent analysis uses the checkpoint selected according to the highest validation Average Precision:
+
+```text
+bestPRROC
+```
+
+For each scaling point and repeated run, predictions are first generated on the centralized validation set.
+
+Two decision-threshold regimes are then evaluated.
+
+### MCC-Optimal Operating Point
+
+The decision threshold maximizing **validation MCC** is selected.
+
+### Fixed Minimum-Recall Operating Point
+
+A minimum validation recall requirement is specified before the evaluation.
+
+The final study uses:
+
+```text
+validation recall ≥ 0.80
+```
+
+Among all thresholds satisfying this requirement, the threshold with the highest validation specificity is selected.
+
+Both selected thresholds are subsequently applied **unchanged** to the test set.
+
+No threshold is optimized on test data.
+
+Run:
+
+```bash
+python3 evaluate-thr-dependent-fedadam.py --min-recall 0.80
+```
+
+The combined output is:
+
+```text
+result/splits_iid_scaling/final_threshold_analysis/FedAdam/
+└── all_threshold_results.csv
+```
+
+---
+
+## `plot-thr-dependent-fedadam.py`
+
+```text
+plot-thr-dependent-fedadam.py
+```
+
+Visualizes the results produced by `evaluate-thr-dependent-fedadam.py`.
+
+The script performs **no checkpoint, communication-round, or threshold selection**.
+
+The MCC-optimal figure contains:
+
+```text
+Panel A: validation-selected decision threshold
+Panel B: test MCC
+Panel C: test recall and specificity
+```
+
+The fixed-recall figure contains:
+
+```text
+Panel A: validation-selected decision threshold
+Panel B: test recall
+Panel C: test specificity
+```
+
+Run:
+
+```bash
+python3 plot-thr-dependent-fedadam.py
+```
+
+---
+
+# 14. Training-Dynamics Analysis
+
+## `evaluate-training-dynamics-fedadam.py`
+
+```text
+evaluate-training-dynamics-fedadam.py
+```
+
+This is a retrospective **centralized-validation** analysis of the FedAdam training trajectories.
+
+For every scaling point, run, and saved communication-round checkpoint, the script calculates validation Average Precision.
+
+The analysis is descriptive only and does not modify:
+
+* training,
+* hyperparameters,
+* checkpoint selection,
+* threshold selection,
+* final test evaluation.
+
+Two quantities are derived.
+
+### First Round Reaching 99% of Best Validation AP
+
+For every run, the script identifies the first evaluated communication round satisfying:
+
+```text
+validation AP ≥ 0.99 × highest validation AP observed in the run
+```
+
+This provides a descriptive measure of how quickly the run approached its best observed validation performance.
+
+### Late-Training Trend
+
+The script fits an ordinary least-squares linear trend to validation AP over the final training interval.
+
+For a 45-round FedAdam run, the default interval is:
+
+```text
+Rounds 35–45
+```
+
+This contains 11 checkpoints and represents a ten-round interval.
+
+The outputs are stored under:
+
+```text
+result/splits_iid_scaling/training_dynamics/FedAdam/
+```
+
+including:
+
+```text
+centralized_validation_set_info.json
+all_round_validation_ap.csv
+training_dynamics_by_run.csv
+training_dynamics_aggregate.csv
+training_dynamics_summary.json
+```
+
+Run:
+
+```bash
+python3 evaluate-training-dynamics-fedadam.py
+```
+
+---
+
+## `plot-training-dynamics-fedadam.py`
+
+```text
+plot-training-dynamics-fedadam.py
+```
+
+Visualizes the results produced by the training-dynamics evaluation.
+
+The figure summarizes:
+
+```text
+Panel A:
+First evaluated communication round reaching
+99% of the best observed validation AP
+
+Panel B:
+Late-training validation-AP slope
+```
+
+Run:
+
+```bash
+python3 plot-training-dynamics-fedadam.py
+```
+
+---
+
+# 15. Complete Execution Order
+
+For a complete reproduction of the final FedAdam pipeline:
+
+```bash
+# 1. Prepare the fixed train / validation / test split
+python3 federated_learning/tools/prepare_data.py \
+    --csv data/diabetes.csv \
+    --parquet data/diabetes.parquet \
+    --stats data/norm_stats.json
+
+# 2. Normalize the features and calculate class weights
+python3 federated_learning/tools/normalize_and_add_weights.py \
+    --parquet data/diabetes.parquet \
+    --stats data/norm_stats.json \
+    --output data/diabetes_normalized.parquet \
+    --pos-weight-boost 1.5
+
+# 3. Generate the IID scaling partitions
+python3 federated_learning/tools/create_iid_scaling_splits.py \
+    --parquet data/diabetes.parquet \
+    --stats data/norm_stats.json \
+    --output-dir splits_iid_scaling \
+    --seed 123
+
+# 4. Prepare centralized validation IDs
+python3 adjust_val_distribution.py
+
+# 5. Run the FedAdam scaling experiments
+./federated_learning/tools/run_iid_scaling.sh
+
+# Alternative: run one experiment using pyproject.toml
+flwr run .
+
+# 6. Select communication-round checkpoints using validation
+python3 scaling_eval.py
+
+# 7. Perform final threshold-independent test evaluation
+python3 final_test_set_eval.py
+
+# 8. Create threshold-independent figures
+python3 plot-thr-indep.py
+
+# 9. Calculate run-to-run dispersion
+python3 table_plot.py
+
+# 10. Select validation operating points and evaluate them on test
+python3 evaluate-thr-dependent-fedadam.py --min-recall 0.80
+
+# 11. Create threshold-dependent figures
+python3 plot-thr-dependent-fedadam.py
+
+# 12. Evaluate training dynamics on centralized validation
+python3 evaluate-training-dynamics-fedadam.py
+
+# 13. Create the training-dynamics figure
+python3 plot-training-dynamics-fedadam.py
+```
+
+---
+
+# 16. Project File Overview
+
+| File                                                            | Purpose                                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `pyproject.toml`                                                | Main Flower, FedAdam, client-training, data-path, and Ray simulation configuration               |
+| `federated_learning/server_app.py`                              | FedAdam server optimization, centralized validation, client coordination, and checkpoint storage |
+| `federated_learning/client_app.py`                              | Neural network and local client training                                                         |
+| `federated_learning/task.py`                                    | Loads client-specific normalized data, class weights, and centralized validation data            |
+| `federated_learning/tools/prepare_data.py`                      | Creates the fixed global train/validation/test partition                                         |
+| `federated_learning/tools/normalize_and_add_weights.py`         | Normalizes features and computes class weights                                                   |
+| `federated_learning/tools/make_splits.py`                       | Helper functions used for client partitioning                                                    |
+| `federated_learning/tools/create_iid_scaling_splits.py`         | Generates the IID client partitions for the scaling study                                        |
+| `federated_learning/tools/analyze_client_label_distribution.py` | Describes local dataset and class-distribution characteristics                                   |
+| `adjust_val_distribution.py`                                    | Makes the complete validation set available as centralized validation IDs                        |
+| `federated_learning/tools/run_iid_scaling.sh`                   | Runs repeated FedAdam experiments across selected client counts                                  |
+| `scaling_eval.py`                                               | Selects best ROC-AUC, AP, and loss checkpoints using centralized validation                      |
+| `final_test_set_eval.py`                                        | Evaluates validation-selected checkpoints on the fixed final test set                            |
+| `plot-thr-indep.py`                                             | Creates threshold-independent FedAdam scalability figures                                        |
+| `table_plot.py`                                                 | Calculates and visualizes run-to-run dispersion                                                  |
+| `evaluate-thr-dependent-fedadam.py`                             | Selects operating-point thresholds on validation and evaluates them on test                      |
+| `plot-thr-dependent-fedadam.py`                                 | Creates threshold-dependent FedAdam figures                                                      |
+| `evaluate-training-dynamics-fedadam.py`                         | Retrospective validation-AP training-dynamics analysis                                           |
+| `plot-training-dynamics-fedadam.py`                             | Creates the training-dynamics figure                                                             |
+
+---
+
+# 17. Result Directory Structure
+
+A simplified result structure is:
+
+```text
+result/
+└── splits_iid_scaling/
+    │
+    ├── splits_iid_2_clients.json/
+    │   └── FedAdam/
+    │       ├── all_rounds_run_1/
+    │       ├── all_rounds_run_2/
+    │       ├── ...
+    │       ├── all_rounds_run_5/
+    │       ├── bestROC/
+    │       ├── bestPRROC/
+    │       └── bestLoss/
+    │
+    ├── ...
+    │
+    ├── splits_iid_32768_clients.json/
+    │   └── FedAdam/
+    │
+    ├── final_test_set_eval/
+    │   └── FedAdam/
+    │       ├── all_test_results.csv
+    │       ├── all_test_aggregate.csv
+    │       ├── final_test_summary.json
+    │       └── test_set_info.json
+    │
+    ├── final_threshold_analysis/
+    │   └── FedAdam/
+    │       └── all_threshold_results.csv
+    │
+    └── training_dynamics/
+        └── FedAdam/
+            ├── centralized_validation_set_info.json
+            ├── all_round_validation_ap.csv
+            ├── training_dynamics_by_run.csv
+            ├── training_dynamics_aggregate.csv
+            └── training_dynamics_summary.json
+```
+
+---
+
+# 18. Output Formats
+
+The main output formats are:
+
+```text
+.pt
+    PyTorch model checkpoints
+
+.json
+    split definitions, run metadata, validation metrics,
+    test metrics, and analysis summaries
+
+.csv
+    run-level and aggregated evaluation results
+
+.pdf
+    vector versions of figures and tables
+
+.png
+    high-resolution raster figures
+
+.log
+    Flower simulation logs
+```
+
+---
+
+# 19. Useful Commands
+
+Start one Flower run:
+
+```bash
+flwr run .
+```
+
+Start the scaling launcher:
+
+```bash
+./federated_learning/tools/run_iid_scaling.sh
+```
+
+Start the scaling launcher in the background:
+
+```bash
+nohup ./federated_learning/tools/run_iid_scaling.sh &
+```
+
+Inspect background output:
+
+```bash
+tail -f nohup.out
+```
+
+Stop remaining Ray processes:
+
+```bash
+ray stop --force
+```
+
+Display the available command-line options of a script:
+
+```bash
+python3 <script>.py --help
+```
+
+Examples:
+
+```bash
+python3 federated_learning/tools/create_iid_scaling_splits.py --help
+python3 evaluate-thr-dependent-fedadam.py --help
+python3 evaluate-training-dynamics-fedadam.py --help
+```
+
+---
+
+# 20. Methodological Notes
+
+## Fixed Global Training Dataset
+
+The amount of global training data remains constant throughout the scaling experiment.
+
+Increasing the number of clients therefore represents increasing **client-level data fragmentation**, not an increase in available training data.
+
+---
+
+## IID Client Partitioning
+
+Training observations are randomly and approximately evenly distributed across clients.
+
+Labels are not used when assigning training observations to clients.
+
+Local class-distribution differences therefore arise naturally from random fragmentation.
+
+---
+
+## Fixed FedAdam Configuration
+
+One FedAdam configuration was selected in the 16,384-client reference setting and subsequently applied unchanged across the scalability study.
+
+The additional 32,768-client experiment extends the FedAdam scaling range beyond the range evaluated for FedAvg and SCAFFOLD.
+
+---
+
+## Client Participation
+
+FedAdam uses a target client participation fraction of:
+
+```text
+0.80
+```
+
+At the two-client configuration, both clients participate.
+
+For larger client configurations, the requested participation fraction is converted to a whole number of participating clients.
+
+---
+
+## Centralized Validation
+
+Validation is performed on the complete fixed validation set.
+
+The corresponding row IDs are stored in:
+
+```text
+centralized_val_row_ids
+```
+
+inside the scaling split files.
+
+The same underlying global validation set is therefore used across scaling points.
+
+---
+
+## Validation-Based Checkpoint Selection
+
+The final reported threshold-independent metrics use different validation-based checkpoint-selection criteria:
+
+```text
+ROC-AUC       → checkpoint with highest validation ROC-AUC
+AP            → checkpoint with highest validation AP
+Weighted loss → checkpoint with lowest validation loss
+```
+
+No checkpoint is selected using test performance.
+
+---
+
+## Threshold Selection
+
+Threshold-dependent analyses use the `bestPRROC` checkpoint.
+
+The decision threshold is determined on validation data according to either:
+
+```text
+maximum validation MCC
+```
+
+or:
+
+```text
+validation recall ≥ 0.80
+followed by maximum validation specificity
+```
+
+The selected threshold is then applied unchanged to the test set.
+
+---
+
+## Final Test Set
+
+The same centralized test set is used for every scaling point and run.
+
+Its membership is defined by:
+
+```text
+norm_stats.json["test_idx"]
+```
+
+The test set does not influence model training, hyperparameter selection, checkpoint selection, or decision-threshold selection.
+
+---
+
+## Training Dynamics
+
+Training dynamics are evaluated retrospectively on the centralized **validation set**.
+
+The analysis determines:
+
+```text
+first evaluated round reaching 99% of best validation AP
+```
+
+and:
+
+```text
+late-training validation-AP slope
+```
+
+For the 45-round FedAdam runs, the late-training interval is rounds 35–45.
+
+This analysis is descriptive and does not affect model selection.
+
+---
+
+# 21. Scope
+
+This README documents the **final IID FedAdam scalability pipeline** used for the bachelor-thesis experiments.
+
+Earlier development files relating to non-IID Dirichlet experiments, calibration analysis, screening-policy-based model selection, fixed-threshold experiments, or debugging are not part of this workflow and are not required to reproduce the final FedAdam scalability results.
