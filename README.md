@@ -1,356 +1,1191 @@
-# Diabetes Prediction with Federated Learning using Flower & PyTorch
-This project uses a Multilayer Perceptron (MLP) built with PyTorch to predict diabetes based on health indicators in a federated learning setting. 
-The model is trained on the [Diabetes Health Indicators Dataset](https://www.kaggle.com/datasets/alexteboul/diabetes-health-indicators-dataset) dataset and orchestrated using [Flower](https://flower.ai/).
+# Federated Edge Learning — SCAFFOLD Scalability Study
 
-The dataset has **253,680 samples** from CDC survey, **21 health indicators** like BMI, age, blood pressure, cholesterol, etc. and is highly **Imbalanced**: 86.1% healthy, 13.9% at-risk.
+This repository contains the experimental code used for the **SCAFFOLD scalability study** conducted as part of the bachelor thesis on federated edge learning for diabetes screening.
 
-By splitting the dataset across clients, we simulate a real-world federated learning scenario where data remains decentralized.\
-Each client:
-- Holds a subset of the full dataset
-- Trains the MLP model locally using PyTorch \
-  -> Want to learn more about my work and insights with MLPs? \
-  Check out my other Repo:  [Multilayer Perceptron](https://github.com/ginasixt/Multilayer-Perceptron.git).
-- Sends only the updated model weights back to the central server
-- Keeps all raw data private and local
+The project uses **PyTorch** for model training and **Flower (FLwr)** for federated orchestration and simulation.
 
-In real-world federated learning (also called "cross-silo"), this data is already distributed across organizations, there's no need to split the data artificially.
+The central objective of the study is to investigate how federated learning behaves when a **fixed global training dataset is distributed across an increasing number of clients**. Increasing the client count therefore does not introduce additional training data, but progressively fragments the same training set into smaller local client datasets.
 
+For SCAFFOLD, the final scalability study evaluates:
 
----
+```text
+2, 4, 8, 16, 32, 64, 128, 256, 512,
+1,024, 2,048, 4,096, 8,192, 16,384 clients
+```
 
-## Table of Contents
+Each scaling point is repeated five times.
 
-- [Installation](#-installation)
-- [Project Architecture](#-project-architecture)
-- [Model Architecture](#-model-architecture)
-- [Training Process](#-training-process)
-- [Multi-Threshold Optimization](#-multi-threshold-optimization)
-- [Screening Policy](#-screening-policy)
-- [Results & Visualizations](#-results--visualizations)
-- [Configuration](#-configuration)
-- [References](#-references)
-
+SCAFFOLD extends FedAvg by introducing a **global server control variate** and a **persistent local control variate for each client**. These control variates modify the client gradients to reduce deviations between local and global optimization directions.
 
 ---
 
-## Installation
+# Requirements and Installation
 
-
-## Quick Start
-
-### Prepare Data
+A Python virtual environment is recommended.
 
 ```bash
-# Download dataset from Kaggle and create train/val/test splits
+python -m venv .venv
+source .venv/bin/activate
+```
+
+Install the project dependencies:
+
+```bash
+pip install -U pip
+pip install -r requirements.txt
+```
+
+The Flower application itself also declares its main runtime dependencies in `pyproject.toml`, including Flower and PyTorch.
+
+---
+
+# Project Workflow
+
+The complete SCAFFOLD workflow is:
+
+```text
+Raw BRFSS dataset
+        │
+        ▼
+prepare_data.py
+        │
+        ▼
+diabetes.parquet + norm_stats.json
+        │
+        ▼
+normalize_and_add_weights.py
+        │
+        ▼
+diabetes_normalized.parquet
+        │
+        ▼
+create_iid_scaling_splits.py
+        │
+        ▼
+IID client partitions
+        │
+        ▼
+adjust_val_distribution.py
+        │
+        ▼
+centralized validation client
+        │
+        ▼
+SCAFFOLD training
+(server_app.py + client_app.py + task.py)
+        │
+        ▼
+scaling_eval_scaffold.py
+        │
+        ├── bestROC
+        ├── bestPRROC
+        └── bestLoss
+        │
+        ├───────────────────────────────┐
+        │                               │
+        ▼                               ▼
+final_test_set_eval_scaffold.py   evaluate-thr-dependent-scaffold.py
+        │                               │
+        ▼                               ▼
+plot-thr-indep-scaffold.py       plot-thr-dep-scaffold.py
+        │
+        ▼
+table_plot_scaffold.py
+
+All saved round checkpoints
+        │
+        ▼
+evaluate-training-dynamics-scaffold.py
+        │
+        ▼
+plot-training-dynamics-scaffold.py
+```
+
+The validation set is used for configuration, checkpoint, and threshold selection. The test set is not used for these selections and is evaluated only after the corresponding validation-based decisions have been made.
+
+---
+
+# 1. Core Federated Learning Components
+
+## `server_app.py`
+
+```text
+federated_learning/server_app.py
+```
+
+Implements the server-side SCAFFOLD strategy.
+
+The custom `ScaffoldFedAvg` strategy extends Flower's standard FedAvg implementation. Model parameters are still aggregated through the usual sample-size-weighted FedAvg procedure, but the strategy additionally maintains the global SCAFFOLD control variate `c`.
+
+During every training round, the server:
+
+1. selects the participating clients,
+2. sends the current global model,
+3. sends the current global control variate `c`,
+4. receives locally updated models,
+5. aggregates the client models using FedAvg,
+6. receives the client control-variate updates `Δc_i`,
+7. updates the global control variate,
+8. stores model checkpoints and evaluation results.
+
+The global control variate is initialized with zeros. After a round, the server updates it using the sum of the participating clients' `Δc_i` values divided by the total client population.
+
+The strategy also stores checkpoints under:
+
+```text
+result/<split-path>/SCAFFOLD/all_rounds_run_<run>/
+```
+
+and writes round-specific evaluation information as JSON files.
+
+---
+
+## `client_app.py`
+
+```text
+federated_learning/client_app.py
+```
+
+Implements the Flower client, the neural-network model, and the local SCAFFOLD optimization step.
+
+The model is a multilayer perceptron with:
+
+```text
+21 input features
+256-unit hidden layer + ReLU
+128-unit hidden layer + ReLU
+2 output logits
+```
+
+The hidden layers use Kaiming initialization.
+
+For every selected client, `fit()`:
+
+1. loads the current global model,
+2. receives the server control variate `c`,
+3. restores the client's persistent local control variate `c_i`,
+4. trains locally using SGD,
+5. applies gradient clipping,
+6. applies the SCAFFOLD correction `c - c_i`,
+7. updates the local model,
+8. computes the updated local control variate,
+9. stores `c_i` in Flower's persistent client state,
+10. returns the updated model and `Δc_i` to the server.
+
+Gradient clipping is applied **before** adding the SCAFFOLD correction term.
+
+The client control variate follows the computationally cheaper SCAFFOLD Option II update.
+
+---
+
+## `task.py`
+
+```text
+federated_learning/task.py
+```
+
+Contains the data-loading utilities used by each Flower client.
+
+For a given client, the script:
+
+1. receives the client's training and validation row IDs,
+2. loads only these rows from the normalized Parquet dataset,
+3. separates features and labels,
+4. retrieves the precomputed class weights from `norm_stats.json`,
+5. creates PyTorch `DataLoader` objects.
+
+The Parquet data are already standardized before training, so no normalization is performed inside `task.py`.
+
+---
+
+# 2. Data Preparation
+
+## `prepare_data.py`
+
+```text
+federated_learning/tools/prepare_data.py
+```
+
+Downloads the binary BRFSS 2015 diabetes dataset and creates a reproducible global train/validation/test split.
+
+The default split is:
+
+```text
+Training:    70%
+Validation:  10%
+Test:        20%
+```
+
+The split is stratified by the target class.
+
+The script stores:
+
+```text
+data/diabetes.parquet
+data/norm_stats.json
+```
+
+The Parquet file contains the feature values, target label, and stable `__row_id__` identifier.
+
+`norm_stats.json` contains:
+
+```text
+train_idx
+val_idx
+test_idx
+feature means
+feature standard deviations
+target-column name
+```
+
+Example:
+
+```bash
 python federated_learning/tools/prepare_data.py \
-    --csv diabetes_binary_health_indicators_BRFSS2015.csv \
+    --csv <input.csv> \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json
 ```
 
-**Output:**
-- `data/diabetes.parquet`: Normalized features + row IDs
-- `data/norm_stats.json`: Mean/std for normalization + split indices
+---
 
-**Why Normalization?**
-- Features have different scales (e.g., Age: 1-13, BMI: 12-98)
-- Neural networks converge faster with normalized inputs
-- Prevents features with large values from dominating
+## `normalize_and_add_weights.py`
 
-**Split Distribution:**
-- Train: 70% (177,576 samples) -> Distributed across 10 clients (simulates 10 hospitals)
-- Validation: 10% (25,368 samples) -> for training hyperparameter like threshold selection without test set contamination
-- Test: 20% (50,736 samples) -> Global Dataset (centralized Evaluation)
-
-### Create Client Partitions
-
-```bash
-# Non-IID split using Dirichlet distribution (α=0.3)
-python federated_learning/tools/make_splits.py \
-    --parquet data/diabetes.parquet \
-    --stats data/norm_stats.json \
-    --out splits_dirichlet_10_a03.json \
-    --num-partitions 10 \
-    --mode dirichlet \
-    --alpha 0.3
+```text
+federated_learning/tools/normalize_and_add_weights.py
 ```
 
-**Output:** `splits_dirichlet_10_a03.json`
+Standardizes the dataset and calculates the class weights used during training.
+
+It uses the previously created global train/validation/test split and does **not** create new splits.
+
+Feature standardization is based exclusively on the mean and standard deviation calculated from the training subset.
+
+The script also calculates global class weights from the training labels and applies the configurable positive-class boost.
+
+Example:
+
+```bash
+python federated_learning/tools/normalize_and_add_weights.py \
+    --parquet data/diabetes.parquet \
+    --stats data/norm_stats.json \
+    --output data/diabetes_normalized.parquet \
+    --pos-weight-boost 1.5
+```
+
+The output is:
+
+```text
+data/diabetes_normalized.parquet
+```
+
+and `norm_stats.json` is extended with fields such as:
+
+```text
+pos_weight
+neg_weight
+pos_weight_boost
+train_pos_count
+train_neg_count
+```
+
+---
+
+# 3. Creating the IID Client Partitions
+
+## `make_splits.py`
+
+```text
+federated_learning/tools/make_splits.py
+```
+
+Contains general partitioning helper functions.
+
+The relevant function for the final scalability study is:
+
+```python
+iid_partitions(...)
+```
+
+which randomly shuffles the training observations and distributes them approximately evenly across the requested number of clients.
+
+The file also contains Dirichlet partitioning functionality. This was used in earlier experiments but is **not part of the final IID scalability study**.
+
+---
+
+## `create_iid_scaling_splits.py`
+
+```text
+federated_learning/tools/create_iid_scaling_splits.py
+```
+
+Generates IID client partitions for increasing client counts.
+
+Example:
+
+```bash
+python federated_learning/tools/create_iid_scaling_splits.py \
+    --parquet data/diabetes.parquet \
+    --stats data/norm_stats.json \
+    --output-dir splits_iid_scaling \
+    --seed 123
+```
+
+Training observations are randomly and approximately evenly distributed across clients.
+
+Labels are **not used for the assignment**. Label statistics are calculated only after partitioning to characterize the resulting natural client-level variation.
+
+The generated files follow the naming scheme:
+
+```text
+splits_iid_scaling/
+├── splits_iid_2_clients.json
+├── splits_iid_4_clients.json
+├── splits_iid_8_clients.json
+├── ...
+└── splits_iid_16384_clients.json
+```
+
+Each file contains:
+
 ```json
 {
-  "train": {
-    "0": [12, 45, 78, ...],  // Client 0's training sample IDs
-    "1": [23, 56, 89, ...],
-    ...
-  },
-  "val": {
-    "0": [105, 234, ...],    // Proportional validation split
-    "1": [67, 189, ...],
-    ...
-  }
+  "train": {...},
+  "val": {...},
+  "meta": {...}
 }
 ```
 
-**Dirichlet α Parameter:**
-- `α=0.1`: Highly non-IID (e.g., Hospital A: 90% elderly, Hospital B: 90% young)
-- `α=0.3`: Moderate heterogeneity (realistic)
-- `α=1.0`: Mild non-IID
+The total training dataset remains fixed across all scaling points.
 
-### Run Federated Training
+---
+
+## `create_scaling_splits.py`
+
+```text
+federated_learning/tools/create_scaling_splits.py
+```
+
+Creates Dirichlet-based non-IID scaling partitions.
+
+This file belongs to earlier non-IID experiments and is **not required for reproducing the final IID SCAFFOLD scalability study**.
+
+---
+
+# 4. Centralizing the Validation Set
+
+## `adjust_val_distribution.py`
+
+```text
+adjust_val_distribution.py
+```
+
+Modifies the generated scaling split files so that the complete validation dataset is assigned to a single validation client.
+
+This reduces evaluation overhead during the large-client simulations and allows later validation-based checkpoint selection to use one complete centralized validation set.
+
+The adjusted split files are subsequently used by `scaling_eval_scaffold.py`.
+
+---
+
+# 5. Configuring SCAFFOLD
+
+The main Flower configuration is stored in:
+
+```text
+pyproject.toml
+```
+
+The Flower application entry points are:
+
+```toml
+[tool.flwr.app.components]
+serverapp = "federated_learning.server_app:app"
+clientapp = "federated_learning.client_app:app"
+```
+
+This means that:
 
 ```bash
-# Train for 20 rounds with 10 clients
-flwr run
+flwr run .
 ```
 
-**What happens then:**
-1. **Server** initializes global model (random weights)
-2. **Each Round:**
-   - Server samples 8/10 clients for training
-   - Clients download global model
-   - Clients train locally for 1 epoch
-   - Clients upload weight updates
-   - Server aggregates using FedAvg
-   - All 10 clients evaluate on local validation data (10 thresholds each)
-   - Server selects best threshold based on aggregated metrics
-3. **After 20 Rounds:**
-   - Screening policy selects best model
-   - Checkpoint saved to `result/alpha03/multi_thr/model_round_X.pt`
-   - Metrics saved to `result/alpha03/multi_thr/run_1.json`
+starts the SCAFFOLD server and client implementations contained in these two files.
 
-**Training Output (Console):**
-```
- Round 1/20
-  ├─ Training: 8 clients selected
-  ├─ Aggregating weights...
-  ├─ Evaluating: 10 thresholds tested
-  └─ Best Threshold: 0.45 (Recall=0.78, Spec=0.72, F1=0.42)
+---
 
- Round 5/20
-  ├─ Training: 8 clients selected
-  ├─ Aggregating weights...
-  ├─ Evaluating: 10 thresholds tested
-  └─ Best Threshold: 0.50 (Recall=0.79, Spec=0.70, F1=0.43)
-  NEW BEST ROUND - Saving checkpoint...
+## Main SCAFFOLD Configuration
 
-...
+The relevant configuration is located under:
 
- Final Summary:
-   Best Round: 5
-   AUC: 0.8223
-   Recall: 0.7847
-   Specificity: 0.7029
-   Threshold: 0.55 (from validation)
+```toml
+[tool.flwr.app.config]
 ```
 
-### Evaluate on Test Set
+The supplied configuration contains:
+
+```toml
+num-server-rounds = 81
+fraction-fit = 0.5
+fraction-evaluate = 1.0
+
+local-epochs = 2
+
+batch-size = 9000
+lr = 1e-2
+weight-decay = 1e-5
+pos-weight-boost = 1.5
+clip-grad-norm = 5.0
+```
+
+For the actual local SCAFFOLD update, the client uses vanilla SGD and explicitly sets optimizer weight decay to zero inside the client implementation.
+
+The important SCAFFOLD-specific settings are therefore primarily:
+
+```text
+Learning rate:          1e-2
+Local epochs:           2
+Gradient clipping:      5.0
+Positive-class boost:   1.5
+```
+
+The large configured batch size ensures that small local datasets are processed in a single batch at the highly fragmented scaling points.
+
+---
+
+## Ray Simulation Configuration
+
+Ray resources are configured in `pyproject.toml`.
+
+The supplied configuration uses:
+
+```toml
+num_cpus = 32
+options.backend.client-resources.num-cpus = 1.0
+options.backend.client-resources.num-gpus = 0.0
+options.backend.max-workers = 32
+```
+
+These parameters control how many simulated clients can run concurrently.
+
+They do **not** change the conceptual number of federated clients participating in a communication round.
+
+The total simulated client population is controlled through:
+
+```toml
+options.num-supernodes = ...
+```
+
+---
+
+# 6. Running SCAFFOLD
+
+There are two main ways to start training.
+
+## Single Flower Run
+
+A single experiment can be started directly with:
 
 ```bash
-python federated_learning/tools/final_test_evaluation_with_val_threshold.py \
-    --result-json result/alpha03/multi_thr/run_1.json \
+flwr run .
+```
+
+This uses the current values in:
+
+```text
+pyproject.toml
+```
+
+including:
+
+```text
+split-path
+number of rounds
+fraction-fit
+local epochs
+learning rate
+gradient clipping
+Ray resources
+```
+
+For a different experiment, edit the corresponding values in `pyproject.toml` before starting the run.
+
+---
+
+## Scaling Experiments
+
+The automated launcher is:
+
+```text
+federated_learning/tools/run_iid_scaling.sh
+```
+
+Run:
+
+```bash
+./federated_learning/tools/run_iid_scaling.sh
+```
+
+If necessary:
+
+```bash
+chmod +x federated_learning/tools/run_iid_scaling.sh
+```
+
+The script:
+
+1. iterates over the configured client counts,
+2. selects the corresponding IID split file,
+3. updates `options.num-supernodes`,
+4. calculates the required number of participating clients,
+5. starts the Flower simulation,
+6. repeats each scaling point multiple times,
+7. stores run-specific logs,
+8. stops and cleans Ray between experiments,
+9. restores the original `pyproject.toml` afterward.
+
+---
+
+## Selecting Client Counts
+
+At the beginning of the launcher:
+
+```bash
+CLIENT_COUNTS=(...)
+```
+
+determines which scaling points are executed.
+
+For the complete SCAFFOLD thesis range, use:
+
+```bash
+CLIENT_COUNTS=(2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384)
+```
+
+For a test run:
+
+```bash
+CLIENT_COUNTS=(4096)
+```
+
+---
+
+## Selecting the Number of Runs
+
+The final study uses:
+
+```bash
+RUNS_PER_SPLIT=5
+```
+
+For debugging:
+
+```bash
+RUNS_PER_SPLIT=1
+```
+
+---
+
+## Run-Specific Flower Overrides
+
+For every simulation, the launcher calls Flower using:
+
+```bash
+flwr run . --run-config "..."
+```
+
+and overrides parameters including:
+
+```text
+split-path
+min-fit-clients
+min-available-clients
+min-evaluate-clients
+num-server-rounds
+run-tag
+```
+
+The corresponding split file is automatically selected as:
+
+```text
+splits_iid_scaling/splits_iid_<N>_clients.json
+```
+
+---
+
+## Important Launcher Note
+
+The currently supplied `run_iid_scaling.sh` contains several historical range-dependent settings.
+
+For reproducing the final SCAFFOLD study, the launcher should be configured consistently for:
+
+```text
+2–16,384 clients
+5 repeated runs
+80 communication rounds
+selected SCAFFOLD participation setting
+```
+
+before launching the complete reproduction.
+
+---
+
+# 7. Validation-Based Checkpoint Selection
+
+## `scaling_eval_scaffold.py`
+
+```text
+scaling_eval_scaffold.py
+```
+
+This is the **first evaluation step after training**.
+
+For every SCAFFOLD scaling point and each of the five runs, the script evaluates every saved communication-round checkpoint on the centralized validation set.
+
+It independently selects:
+
+```text
+bestROC
+    highest validation ROC-AUC
+
+bestPRROC
+    highest validation Average Precision
+
+bestLoss
+    lowest weighted validation loss
+```
+
+The selected checkpoints are copied to:
+
+```text
+result/splits_iid_scaling/
+└── splits_iid_<N>_clients.json/
+    └── SCAFFOLD/
+        ├── bestROC/
+        ├── bestPRROC/
+        └── bestLoss/
+```
+
+The test set is not used during this step.
+
+Run:
+
+```bash
+python scaling_eval_scaffold.py
+```
+
+---
+
+# 8. Threshold-Independent Final Test Evaluation
+
+## `final_test_set_eval_scaffold.py`
+
+```text
+final_test_set_eval_scaffold.py
+```
+
+Evaluates only the checkpoints previously selected on the validation set.
+
+For every scaling point and run, the script evaluates:
+
+```text
+bestROC
+bestPRROC
+bestLoss
+```
+
+on the fixed centralized test set.
+
+It calculates:
+
+```text
+weighted cross-entropy loss
+ROC-AUC
+Average Precision
+ROC curve
+precision-recall curve
+test-set prevalence
+```
+
+The combined outputs are written to:
+
+```text
+result/splits_iid_scaling/final_test_set_eval/SCAFFOLD/
+```
+
+including:
+
+```text
+all_test_results.csv
+all_test_aggregate.csv
+final_test_summary.json
+test_set_info.json
+```
+
+Run:
+
+```bash
+python final_test_set_eval_scaffold.py
+```
+
+---
+
+# 9. Threshold-Independent Figures
+
+## `plot-thr-indep-scaffold.py`
+
+```text
+plot-thr-indep-scaffold.py
+```
+
+Creates the threshold-independent SCAFFOLD scalability figures.
+
+The main absolute-performance figure contains:
+
+```text
+Panel A: ROC-AUC
+Panel B: Average Precision
+Panel C: Weighted loss
+```
+
+Each metric uses the checkpoint selected with the corresponding validation criterion.
+
+The script also supports relative-change and run-stability visualizations.
+
+Default input:
+
+```text
+result/splits_iid_scaling/final_test_set_eval/SCAFFOLD/
+    all_test_results.csv
+```
+
+Run:
+
+```bash
+python plot-thr-indep-scaffold.py
+```
+
+---
+
+# 10. Run-to-Run Dispersion
+
+## `table_plot_scaffold.py`
+
+```text
+table_plot_scaffold.py
+```
+
+Analyzes variation across the five repeated SCAFFOLD runs.
+
+For each scaling point and metric, it calculates statistics such as:
+
+```text
+mean
+standard deviation
+coefficient of variation
+minimum
+maximum
+maximum relative deviation from the mean
+```
+
+The analysis is performed for:
+
+```text
+ROC-AUC
+Average Precision
+Weighted loss
+```
+
+using the corresponding validation-selected checkpoints.
+
+Typical outputs include:
+
+```text
+run_dispersion_table.csv
+run_dispersion_summary_full.csv
+run_dispersion_table.md
+run_dispersion_text_summary.txt
+run_dispersion_by_scaling.csv
+
+table_run_to_run_dispersion.pdf
+table_run_to_run_dispersion.png
+
+figure_run_to_run_dispersion_by_scaling.pdf
+figure_run_to_run_dispersion_by_scaling.png
+```
+
+Run:
+
+```bash
+python table_plot_scaffold.py
+```
+
+---
+
+# 11. Threshold-Dependent Evaluation
+
+## `evaluate-thr-dependent-scaffold.py`
+
+```text
+evaluate-thr-dependent-scaffold.py
+```
+
+Uses the checkpoint previously selected according to highest validation AP (`bestPRROC`).
+
+For every scaling point and run:
+
+1. validation predictions are generated,
+2. two operating points are selected on validation,
+3. the selected thresholds are transferred unchanged to the test set,
+4. final threshold-dependent test metrics are calculated.
+
+Two operating points are used.
+
+### MCC-optimal
+
+The validation threshold that maximizes MCC is selected.
+
+### Minimum validation recall
+
+A minimum validation recall requirement is specified before evaluation.
+
+For the thesis:
+
+```text
+Recall >= 0.80
+```
+
+Among all eligible thresholds, validation specificity is maximized.
+
+Run:
+
+```bash
+python evaluate-thr-dependent-scaffold.py --min-recall 0.80
+```
+
+The combined output is:
+
+```text
+result/splits_iid_scaling/final_threshold_analysis/SCAFFOLD/
+    all_threshold_results.csv
+```
+
+---
+
+## `plot-thr-dep-scaffold.py`
+
+```text
+plot-thr-dep-scaffold.py
+```
+
+Plots the previously generated threshold-dependent results.
+
+It does **not** select a model, communication round, or threshold.
+
+### MCC-optimal figure
+
+```text
+Panel A: validation-selected decision threshold
+Panel B: test MCC
+Panel C: test recall and specificity
+```
+
+### Fixed minimum-recall figure
+
+```text
+Panel A: validation-selected decision threshold
+Panel B: test recall and specificity
+```
+
+Run:
+
+```bash
+python plot-thr-dep-scaffold.py
+```
+
+---
+
+# 12. Training-Dynamics Analysis
+
+## `evaluate-training-dynamics-scaffold.py`
+
+```text
+evaluate-training-dynamics-scaffold.py
+```
+
+Retrospectively evaluates all saved SCAFFOLD checkpoints on the centralized test set using Average Precision.
+
+The analysis is descriptive only and does not alter training or model selection.
+
+Two quantities are calculated.
+
+### Time to near-best performance
+
+The script determines the first evaluated communication round for which:
+
+```text
+test AP >= 0.99 × best observed test AP in the run
+```
+
+### Late-training trend
+
+An ordinary least-squares regression is fitted to the AP values over the final configured communication-round window.
+
+The output includes:
+
+```text
+all_round_test_ap.csv
+training_dynamics_by_run.csv
+training_dynamics_aggregate.csv
+training_dynamics_summary.json
+```
+
+Run:
+
+```bash
+python evaluate-training-dynamics-scaffold.py
+```
+
+---
+
+## `plot-training-dynamics-scaffold.py`
+
+```text
+plot-training-dynamics-scaffold.py
+```
+
+Visualizes the training-dynamics results.
+
+The resulting figure contains:
+
+```text
+Panel A:
+First evaluated round reaching 99% of the best observed test AP
+
+Panel B:
+Late-training AP slope per communication round
+```
+
+Run:
+
+```bash
+python plot-training-dynamics-scaffold.py
+```
+
+---
+
+# 13. Complete Execution Order
+
+A complete SCAFFOLD workflow is:
+
+```bash
+# 1. Prepare train / validation / test metadata
+python federated_learning/tools/prepare_data.py \
+    --csv <input.csv> \
+    --parquet data/diabetes.parquet \
+    --stats data/norm_stats.json
+
+# 2. Normalize features and calculate class weights
+python federated_learning/tools/normalize_and_add_weights.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
-    --output final_evaluation
+    --output data/diabetes_normalized.parquet \
+    --pos-weight-boost 1.5
+
+# 3. Generate IID scaling splits
+python federated_learning/tools/create_iid_scaling_splits.py \
+    --parquet data/diabetes.parquet \
+    --stats data/norm_stats.json \
+    --output-dir splits_iid_scaling \
+    --seed 123
+
+# 4. Centralize validation data in the split files
+python adjust_val_distribution.py
+
+# 5. Run SCAFFOLD scaling experiments
+./federated_learning/tools/run_iid_scaling.sh
+
+# 6. Select checkpoints on validation
+python scaling_eval_scaffold.py
+
+# 7. Final threshold-independent test evaluation
+python final_test_set_eval_scaffold.py
+
+# 8. Generate threshold-independent figures
+python plot-thr-indep-scaffold.py
+
+# 9. Calculate run-to-run dispersion
+python table_plot_scaffold.py
+
+# 10. Select validation operating points and evaluate on test
+python evaluate-thr-dependent-scaffold.py --min-recall 0.80
+
+# 11. Generate threshold-dependent figures
+python plot-thr-dep-scaffold.py
+
+# 12. Evaluate training dynamics
+python evaluate-training-dynamics-scaffold.py
+
+# 13. Generate training-dynamics figure
+python plot-training-dynamics-scaffold.py
 ```
 
-**Output Files:**
-- `final_evaluation/test_report.json`: All metrics (AUC, confusion matrix, etc.)
-- `final_evaluation/test_roc_curve.png`: Publication-ready ROC plot
-- `final_evaluation/test_confusion_matrix.png`: Annotated confusion matrix
-- `final_evaluation/test_roc_data.npz`: Raw ROC data (for reproducibility)
-
-### Generate Plots
+A single Flower experiment can instead be started using:
 
 ```bash
-python plot_results.py \
-    --root result \
-    --out plots_out_03
-```
-
-**Output**: 10+ plots analyzing performance across thresholds and α values
-
----
-
-## Project Architecture
-
-### Directory Structure
-
-```
-federated-diabetes-screening/
-│
-├── federated_learning/          # Core package
-│   ├── __init__.py
-│   ├── client_app.py               # Client training logic
-│   ├── server_app.py               # Aggregation strategy
-│   ├── task.py                     # Data loading utilities
-│   ├── screening_policy.py         # Best round selection
-│   │
-│   ├── tools/                   # Data preparation scripts
-│   │   ├── prepare_data.py         # Train/val/test split + normalization
-│   │   ├── make_splits.py          # Dirichlet partitioning
-│   │   └── final_test_evaluation_with_val_threshold.py # for evaluation of the best round with the test set
-│   │
-│   └── plotting/                # Visualization tools
-│       ├── compare_thresholds_report.py
-│       ├── more_screening_plots.py
-│       └── plot_centralized_roc.py
-│
-├── data/                        # Prepared datasets
-│   ├── diabetes.parquet            # Normalized features
-│   ├── norm_stats.json             # Mean/std + split indices
-│   └── splits_dirichlet_10_a03.json
-│
-├── final_evaluation/            # Test set results
-│   ├── test_report.json
-│   ├── test_roc_curve.png
-│   └── test_confusion_matrix.png
-│
-├── pyproject.toml                  # Project config + dependencies
-└── README.md                       # This file
+flwr run .
 ```
 
 ---
 
+# 14. Project File Overview
 
-## Model Architecture
-
-### Multi-Layer Perceptron (MLP)
-
-```python
-MLP(
-  (net): Sequential(
-    (0): Linear(in_features=21, out_features=256)
-    (1): ReLU()
-    (2): Linear(in_features=256, out_features=128)
-    (3): ReLU()
-    (4): Linear(in_features=128, out_features=2)  # Binary classification
-  )
-)
-```
-
-**Parameters**: 59,650 (trainable)
-
-**Design Choices:**
-
-| Component | Choice | Justification |
-|-----------|--------|---------------|
-| **Input Dim** | 21 | Number of health indicators |
-| **Hidden Layers** | [256, 128] | Sufficient capacity for tabular data |
-| **Activation** | ReLU | Fast, prevents vanishing gradients |
-| **Output** | 2 logits | Softmax for class probabilities |
-| **Initialization** | Kaiming Normal | Optimal for ReLU networks |
-| **Dropout** | None | Implicit regularization via FedAvg |
-
-
-## Training Process
-
-Our federated learning system employs several techniques to handle the challenges of of medical AI: 
-- severe class imbalance (86% healthy vs 14% diabetic)
-- heterogeneous client data
-- and the need for high recall in clinical screening.
+| File                                                    | Purpose                                                                                              |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `pyproject.toml`                                        | Flower application, SCAFFOLD hyperparameters, data paths, and Ray simulation resources               |
+| `federated_learning/server_app.py`                      | Server-side SCAFFOLD strategy, FedAvg aggregation, global control-variate update, checkpoint storage |
+| `federated_learning/client_app.py`                      | MLP, local SCAFFOLD training, client control variate, gradient correction and evaluation             |
+| `federated_learning/task.py`                            | Loads client-specific normalized data and class weights                                              |
+| `federated_learning/tools/prepare_data.py`              | Creates the fixed global train/validation/test split                                                 |
+| `federated_learning/tools/normalize_and_add_weights.py` | Standardizes features and computes class weights                                                     |
+| `federated_learning/tools/make_splits.py`               | General IID/Dirichlet partitioning helpers                                                           |
+| `federated_learning/tools/create_iid_scaling_splits.py` | Creates the final IID scaling partitions                                                             |
+| `federated_learning/tools/create_scaling_splits.py`     | Legacy/non-IID Dirichlet scaling utility                                                             |
+| `adjust_val_distribution.py`                            | Moves the full validation set to one validation client                                               |
+| `federated_learning/tools/run_iid_scaling.sh`           | Launches repeated Flower simulations across selected client counts                                   |
+| `scaling_eval_scaffold.py`                              | Evaluates saved checkpoints on validation and selects best ROC/AP/loss checkpoints                   |
+| `final_test_set_eval_scaffold.py`                       | Evaluates validation-selected checkpoints on the final test set                                      |
+| `plot-thr-indep-scaffold.py`                            | Creates threshold-independent SCAFFOLD figures                                                       |
+| `table_plot_scaffold.py`                                | Calculates run-to-run dispersion statistics and figures                                              |
+| `evaluate-thr-dependent-scaffold.py`                    | Selects validation operating points and evaluates them on test                                       |
+| `plot-thr-dep-scaffold.py`                              | Creates threshold-dependent figures                                                                  |
+| `evaluate-training-dynamics-scaffold.py`                | Retrospective AP-based training-dynamics evaluation                                                  |
+| `plot-training-dynamics-scaffold.py`                    | Creates the SCAFFOLD training-dynamics figure                                                        |
 
 ---
 
-### Class Weighting (Weighted Cross-Entropy)
-- Standard training would produce a model that predicts "healthy" for everyone, achieving 86% accuracy but missing all diabetic cases
-- We apply weighted Cross-Entropy loss using global prevalence statistics. The positive class (diabetic) receives significantly higher weight than the negative class (healthy), forcing the model to prioritize recall over overall accuracy. 
-- The class weights are computed from the full training set (not client-local - in real FL enviroment each client should send the aggregated count to the server, the sever computes global prevalence and broadcasts class weights, so that the raw patient data never leaves the client)
-- The boost factor is configurable (default 2.0) via TOML.
+# 15. Result Directory Structure
 
-### Federated Averaging (FedAvg)
-- Each round, the server samples 80% of clients (8 out of 10) for training while all clients participate in evaluation. Client updates are aggregated using data-size-weighted averaging, giving larger hospitals proportionally more influence.
-- Implemented by the Flower strategy, wrapped in our custom class `federated_learning.server_app.FedAvgWithScreening`.
-- Why: FedAvg is simple, robust, and effective for cross-silo FL. Weighting by local sample counts balances influence across heterogeneous clients and speeds convergence.
+A simplified result structure is:
 
-### FedProx for Non-IID Stability
-- Non-IID data distributions cause "client drift", clients with different patient demographics can push model updates in conflicting directions, leading to oscillating convergence.
-- We add a proximal regularization term that penalizes large deviations from the global model during local training. This keeps client updates within a reasonable neighborhood of the global optimum while preserving local adaptation capability.
-- The proximal coefficient (μ = 0.001) provides mild regularization without over-constraining local learning, improving stability by ~15-20% in our non-IID experiments.
-
-### Adaptive Learning Rate Schedule  
-
-**Strategy**: Two-phase learning rate schedule optimized for short federated runs:
-- **Phase 1 (Rounds 1-2)**: High learning rate (0.01) for rapid exploration of parameter space
-- **Phase 2 (Rounds 3-20)**: Reduced learning rate (0.005) for careful refinement around promising solutions
-
-Early rounds benefit from aggressive updates to quickly escape poor local minima, while later rounds require stability to converge on optimal parameters without overshooting.
-
-### Gradient Clipping for Stability
-- Non-IID client data can produce rare gradient spikes that destabilize training. We clip gradients to a maximum L2 norm (5.0) to prevent exploding gradients while preserving gradient direction.
-- Essential for training stability when combined with class weighting, which amplifies gradients for minority class examples. Prevents training failures from outlier batches without slowing normal convergence.
-
-### Weight Decay Regularization
-L2 penalty (λ = 1e-4) applied via optimizer weight decay, equivalent to adding a regularization term that shrinks parameters toward zero.
-- Prevents overfitting to small client datasets
-- Encourages simpler model hypotheses that transfer better across clients
-- Reduces parameter variance in federated settings where clients see different data distributions
-
-### Additional Training Optimizations
-
-**SGD with Momentum**: We use SGD with 0.9 momentum rather than adaptive optimizers (Adam, AdaGrad), as momentum-based methods are more robust to the noise and heterogeneity inherent in federated learning.
-
-**Single Local Epoch**: Each client trains for exactly one epoch per round - a federated learning best practice that prevents overfitting to local data while maintaining update diversity across clients.
-
-**Kaiming Initialization**: Hidden layers use Kaiming Normal initialization optimized for ReLU activations, ensuring stable gradient flow from the start of training.
-
-**Multi-threshold validation** and screening policy
-Each client evaluates a grid of thresholds on its validation split. The server aggregates confusion-matrix counts per threshold and selects the best threshold using a clinically motivated composite score and tracks history.
-Screening requires prioritizing recall while maintaining acceptable specificity and stability. Threshold selection on validation (not test) prevents leakage and simulates realistic deployment.
-At the end of the run we evaluate the best round (best metrics according to screening policy) with the test data set.
-
-We select the best threshold by:
-
-**Hard Constraints:**
-- **Recall ≥ 0.75**: Safety requirement (must catch 75%+ of diabetic patients)
-
-**Soft Preferences:**
-- **Specificity ≥ 0.70**: Avoid overwhelming follow-up capacity
-- **F1 Score**: Overall balance
-- **Stability**: Prefer thresholds that work across clients
-
-**Fallback Strategy:**
-If no threshold meets min_recall:
-1. Try relaxed recall (0.70) + spec (0.65)
-2. Use Youden's Index: `J = recall + spec - 1`
-3. Log warning for manual review
+```text
+result/
+└── splits_iid_scaling/
+    │
+    ├── splits_iid_2_clients.json/
+    │   └── SCAFFOLD/
+    │       ├── all_rounds_run_1/
+    │       ├── ...
+    │       ├── bestROC/
+    │       ├── bestPRROC/
+    │       └── bestLoss/
+    │
+    ├── ...
+    │
+    ├── splits_iid_16384_clients.json/
+    │   └── SCAFFOLD/
+    │
+    ├── final_test_set_eval/
+    │   └── SCAFFOLD/
+    │       ├── all_test_results.csv
+    │       ├── all_test_aggregate.csv
+    │       └── ...
+    │
+    ├── final_threshold_analysis/
+    │   └── SCAFFOLD/
+    │       └── all_threshold_results.csv
+    │
+    └── training_dynamics/
+        └── SCAFFOLD/
+            ├── all_round_test_ap.csv
+            ├── training_dynamics_by_run.csv
+            └── training_dynamics_aggregate.csv
+```
 
 ---
 
-## Screening Policy
-bla bla bla
+# 16. Useful Commands
 
-### Pareto Optimality
+Start one run:
 
-**Definition**: Round A dominates Round B if:
-- `recall(A) ≥ recall(B)` **AND**
-- `spec(A) ≥ spec(B)` **AND**
-- At least one inequality is strict
-
-**Example:**
-```
-Round 5:  Recall=0.785, Spec=0.729  ← Pareto-optimal
-Round 10: Recall=0.790, Spec=0.706  ← Pareto-optimal (higher recall, lower spec)
-Round 8:  Recall=0.780, Spec=0.720  ← Dominated by Round 5
+```bash
+flwr run .
 ```
 
-### Stability Score
-Late rounds might overfit to validation data, we adress this too with the stability score
+Start the scaling launcher:
 
+```bash
+./federated_learning/tools/run_iid_scaling.sh
+```
 
+Start it in the background:
 
-## Run with the Deployment Engine
+```bash
+nohup ./federated_learning/tools/run_iid_scaling.sh &
+```
 
-Follow this [how-to guide](https://flower.ai/docs/framework/how-to-run-flower-with-deployment-engine.html) to run the same app in this example but with Flower's Deployment Engine. After that, you might be interested in setting up [secure TLS-enabled communications](https://flower.ai/docs/framework/how-to-enable-tls-connections.html) and [SuperNode authentication](https://flower.ai/docs/framework/how-to-authenticate-supernodes.html) in your federation.
+Inspect logs:
 
-You can run Flower on Docker too! Check out the [Flower with Docker](https://flower.ai/docs/framework/docker/index.html) documentation.
+```bash
+tail -f nohup.out
+```
 
+Stop Ray:
 
-## Resources
+```bash
+ray stop --force
+```
 
-- Flower website: [flower.ai](https://flower.ai/)
-- Check the documentation: [flower.ai/docs](https://flower.ai/docs/)
-- Give Flower a ⭐️ on GitHub: [GitHub](https://github.com/adap/flower)
-- Join the Flower community!
-  - [Flower Slack](https://flower.ai/join-slack/)
-  - [Flower Discuss](https://discuss.flower.ai/)
+Show script options:
 
+```bash
+python <script>.py --help
+```
+
+---
+
+# 17. Methodological Notes
+
+### Fixed global dataset
+
+The global training sample size is identical across all client counts. Increasing the number of clients therefore represents increasing **data fragmentation**, not increasing training data.
+
+### IID partitioning
+
+Training samples are randomly and approximately evenly distributed without using the labels during client assignment.
+
+### SCAFFOLD control variates
+
+SCAFFOLD maintains one global control variate and one persistent local control variate per client.
+
+The global model parameters are still aggregated using sample-size-weighted FedAvg.
+
+### Local optimization
+
+Clients use SGD and class-weighted cross-entropy.
+
+Gradient clipping is applied before adding the SCAFFOLD correction.
+
+### Persistent client state
+
+The local control variate `c_i` is stored using Flower's per-client state and restored when the same client participates in later rounds.
+
+### Validation-based selection
+
+Final checkpoints and operating-point thresholds are selected only from validation data.
+
+### Final test evaluation
+
+The final test set does not influence training, hyperparameter selection, checkpoint selection, or threshold selection.
+
+### Retrospective training dynamics
+
+The test trajectories used for training-dynamics analysis are descriptive only and do not alter the training procedure or selected models.
+
+---
+
+# 18. Scope
+
+This README documents the **SCAFFOLD branch of the bachelor-thesis scalability experiments**.
+
+The repository may contain additional scripts from earlier experiments, including Dirichlet partitions and older screening utilities. These are not required for reproducing the final IID SCAFFOLD scalability analysis.
