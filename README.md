@@ -19,7 +19,7 @@ FedAdam differs from FedAvg primarily through its adaptive **server-side optimiz
 
 ---
 
-# 1. Requirements and Installation
+# Requirements and Installation
 
 A Python virtual environment is recommended.
 
@@ -47,7 +47,7 @@ pyproject.toml
 
 ---
 
-# 2. Overall Workflow
+# Overall Workflow
 
 The final FedAdam experiment follows this workflow:
 
@@ -147,7 +147,7 @@ The validation set is used for checkpoint and threshold selection. The test set 
 
 ---
 
-# 3. Core Federated Learning Components
+# Core Federated Learning Components
 
 ## `server_app.py`
 
@@ -269,7 +269,7 @@ which is used by the server and later validation-based evaluation scripts to loa
 
 ---
 
-# 4. Data Preparation
+# Data Preparation
 
 ## `prepare_data.py`
 
@@ -371,7 +371,7 @@ pos_weight_boost
 
 ---
 
-# 5. Creating the IID Scaling Partitions
+# Creating the IID Scaling Partitions
 
 ## `make_splits.py`
 
@@ -463,39 +463,10 @@ It can be used to inspect quantities such as:
 
 This script is an analysis utility and is not required to start the federated training.
 
----
-
-# 6. Centralized Validation Mapping
-
-## `adjust_val_distribution.py`
-
-```text
-adjust_val_distribution.py
-```
-
-Modifies the generated split files so that the full validation set is available through a centralized validation mapping.
-
-The adjusted files contain:
-
-```text
-centralized_val_row_ids
-```
-
-which are used by the FedAdam server and by the later validation-based evaluation scripts.
-
-This avoids distributing the complete validation procedure across thousands of simulated clients and substantially reduces evaluation overhead.
-
-Run:
-
-```bash
-python3 adjust_val_distribution.py
-```
-
-This step should be performed before training if the generated split files do not yet contain `centralized_val_row_ids`.
 
 ---
 
-# 7. Configuring FedAdam
+# Configuring FedAdam
 
 The main experiment configuration is stored in:
 
@@ -590,27 +561,7 @@ The configuration used for an actual run is always determined by the values in `
 
 ---
 
-## Ray Simulation Settings
-
-The simulation backend is also configured in `pyproject.toml`.
-
-Typical settings include:
-
-```text
-options.num-supernodes
-num_cpus
-options.backend.client-resources.num-cpus
-options.backend.client-resources.num-gpus
-options.backend.max-workers
-```
-
-These parameters control simulation parallelism and resource allocation.
-
-They do **not** change the conceptual number of participating federated clients. For example, thousands of simulated clients may participate in a communication round while only a smaller number are executed concurrently by Ray.
-
----
-
-# 8. Starting FedAdam Training
+# Starting FedAdam Training
 
 There are two ways to start the training.
 
@@ -729,7 +680,7 @@ or through the run-specific log files produced by the launcher.
 
 ---
 
-# 9. Validation-Based Checkpoint Selection
+# Validation-Based Checkpoint Selection
 
 ## `scaling_eval.py`
 
@@ -790,7 +741,7 @@ python3 scaling_eval.py
 
 ---
 
-# 10. Final Threshold-Independent Test Evaluation
+# Final Threshold-Independent Test Evaluation
 
 ## `final_test_set_eval.py`
 
@@ -853,7 +804,7 @@ test_curves.json
 
 ---
 
-# 11. Threshold-Independent Figures
+# Threshold-Independent Figures
 
 ## `plot-thr-indep.py`
 
@@ -896,7 +847,7 @@ The script also supports additional visualizations such as relative change from 
 
 ---
 
-# 12. Run-to-Run Dispersion
+# Run-to-Run Dispersion
 
 ## `table_plot.py`
 
@@ -947,7 +898,7 @@ python3 table_plot.py
 
 ---
 
-# 13. Threshold-Dependent Evaluation
+# Threshold-Dependent Evaluation
 
 ## `evaluate-thr-dependent-fedadam.py`
 
@@ -1034,7 +985,7 @@ python3 plot-thr-dependent-fedadam.py
 
 ---
 
-# 14. Training-Dynamics Analysis
+# Training-Dynamics Analysis
 
 ## `evaluate-training-dynamics-fedadam.py`
 
@@ -1129,7 +1080,7 @@ python3 plot-training-dynamics-fedadam.py
 
 ---
 
-# 15. Complete Execution Order
+# Complete Execution Order
 
 For a complete reproduction of the final FedAdam pipeline:
 
@@ -1190,7 +1141,7 @@ python3 plot-training-dynamics-fedadam.py
 
 ---
 
-# 16. Project File Overview
+# Project File Overview
 
 | File                                                            | Purpose                                                                                          |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -1216,7 +1167,7 @@ python3 plot-training-dynamics-fedadam.py
 
 ---
 
-# 17. Result Directory Structure
+# Result Directory Structure
 
 A simplified result structure is:
 
@@ -1261,34 +1212,7 @@ result/
 
 ---
 
-# 18. Output Formats
-
-The main output formats are:
-
-```text
-.pt
-    PyTorch model checkpoints
-
-.json
-    split definitions, run metadata, validation metrics,
-    test metrics, and analysis summaries
-
-.csv
-    run-level and aggregated evaluation results
-
-.pdf
-    vector versions of figures and tables
-
-.png
-    high-resolution raster figures
-
-.log
-    Flower simulation logs
-```
-
----
-
-# 19. Useful Commands
+# Useful Commands
 
 Start one Flower run:
 
@@ -1336,7 +1260,7 @@ python3 evaluate-training-dynamics-fedadam.py --help
 
 ---
 
-# 20. Methodological Notes
+# Methodological Notes
 
 ## Fixed Global Training Dataset
 
@@ -1376,21 +1300,6 @@ At the two-client configuration, both clients participate.
 
 For larger client configurations, the requested participation fraction is converted to a whole number of participating clients.
 
----
-
-## Centralized Validation
-
-Validation is performed on the complete fixed validation set.
-
-The corresponding row IDs are stored in:
-
-```text
-centralized_val_row_ids
-```
-
-inside the scaling split files.
-
-The same underlying global validation set is therefore used across scaling points.
 
 ---
 
@@ -1465,8 +1374,3 @@ This analysis is descriptive and does not affect model selection.
 
 ---
 
-# 21. Scope
-
-This README documents the **final IID FedAdam scalability pipeline** used for the bachelor-thesis experiments.
-
-Earlier development files relating to non-IID Dirichlet experiments, calibration analysis, screening-policy-based model selection, fixed-threshold experiments, or debugging are not part of this workflow and are not required to reproduce the final FedAdam scalability results.
