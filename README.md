@@ -1,45 +1,25 @@
 # Federated Edge Learning — FedAvg Scalability Study
 
-This repository contains the experimental code used for the **FedAvg scalability study** conducted as part of the bachelor thesis on federated edge learning for diabetes screening.
+This repository contains the experimental code for the **FedAvg scalability study** conducted as part of a bachelor thesis on federated edge learning for diabetes screening.
 
-The project uses  **Flower (FLwr)** for federated orchestration and simulation.
+The implementation uses **PyTorch** for model training and **Flower (FLwr)** for federated orchestration and simulation.
 
-The central objective of the scalability study is to investigate how federated learning behaves when a **fixed global training dataset is distributed across an increasing number of clients**. Increasing the client count therefore does not add additional training data, but progressively fragments the same dataset into smaller local subsets.
+The central experiment investigates how federated learning behaves when a **fixed global training dataset is distributed across an increasing number of clients**. Increasing the number of clients therefore does not add training data, but progressively fragments the same dataset into smaller local client datasets.
 
-For FedAvg, the evaluated client configurations are:
+The final FedAvg scalability study evaluates:
 
 ```text
 2, 4, 8, 16, 32, 64, 128, 256, 512,
-1,024, 2,048, 4,096, 8,192, 16,384
+1,024, 2,048, 4,096, 8,192, 16,384 clients
 ```
 
-Each scaling point is repeated **five times**. The selected FedAvg configuration uses **80 communication rounds** and a target client participation fraction of **0.80** with a minimum participation of 2 clients.
+Each scaling point is repeated **five times**.
+
+FedAvg performs local model training on participating clients and aggregates the resulting client models on the server using sample-size-weighted averaging.
 
 > **Legacy naming**
 >
-> Several evaluation scripts and result directories still use the identifier `FedProx`. These files correspond to the configuration reported as **FedAvg** in the final thesis. The historical names are retained where necessary to preserve compatibility with the existing result directory structure.
-
----
-
-## Contents
-
-* [Requirements and Installation](#requirements-and-installation)
-* [Project Workflow](#project-workflow)
-* [Data Preparation](#1-data-preparation)
-* [Creating IID Scaling Splits](#2-creating-iid-scaling-splits)
-* [Configuring FedAvg](#3-configuring-fedavg)
-* [Running the Scaling Study](#4-running-the-fedavg-scaling-study)
-* [Evaluation Workflow](#5-evaluation-workflow)
-* [Validation-Based Checkpoint Selection](#6-validation-based-checkpoint-selection)
-* [Threshold-Independent Test Evaluation](#7-threshold-independent-final-test-evaluation)
-* [Run-to-Run Dispersion](#8-run-to-run-dispersion)
-* [Threshold-Dependent Evaluation](#9-threshold-dependent-evaluation)
-* [Training-Dynamics Analysis](#10-training-dynamics-analysis)
-* [Configuration-Selection Plot](#11-configuration-selection-plot)
-* [Complete Execution Order](#12-complete-execution-order)
-* [Project File Overview](#13-project-file-overview)
-* [Result Directory Structure](#14-result-directory-structure)
-* [Useful Commands](#15-useful-commands)
+> Several internal result directories and legacy identifiers still use the name `FedProx`. These results correspond to the experiments reported as **FedAvg** in the final thesis. The historical identifier is retained where required for compatibility with the existing result structure.
 
 ---
 
@@ -47,37 +27,23 @@ Each scaling point is repeated **five times**. The selected FedAvg configuration
 
 A Python virtual environment is recommended.
 
-## Requirements
-
-* Python 3.10+
-* `pip`
-* Flower
-* PyTorch
-* NumPy
-* pandas
-* scikit-learn
-* matplotlib
-* PyArrow
-
-Additional dependencies are listed in `requirements.txt` and `pyproject.toml`.
-
-## Installation
-
-Create and activate a virtual environment:
+Create and activate the environment:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Upgrade `pip` and install the dependencies:
+Install the required packages:
 
 ```bash
 pip install -U pip
 pip install -r requirements.txt
 ```
 
-The Flower application components and the main simulation configuration are defined in:
+The main project dependencies include Flower, PyTorch, NumPy, pandas, scikit-learn, matplotlib, and PyArrow.
+
+The Flower application and experiment configuration are defined in:
 
 ```text
 pyproject.toml
@@ -85,85 +51,204 @@ pyproject.toml
 
 ---
 
-# Project Workflow
+# Overall Workflow
 
-The complete FedAvg workflow is:
+The final FedAvg experiment follows this workflow:
 
 ```text
-Raw dataset
-    │
-    ▼
-Data preparation
-    │
-    ▼
-Feature normalization
-and class weights
-    │
-    ▼
-IID scaling splits
-    │
-    ▼
+Raw BRFSS dataset
+        │
+        ▼
+prepare_data.py
+        │
+        ▼
+Fixed train / validation / test split
+        │
+        ▼
+normalize_and_add_weights.py
+        │
+        ▼
+Normalized dataset + class weights
+        │
+        ▼
+create_iid_scaling_splits.py
+        │
+        ▼
+IID client partitions
+        │
+        ├── analyze_iid_splits_one_row_per_split.py
+        │
+        ▼
 FedAvg training
-    │
-    ▼
-Validation-based
-checkpoint selection
-    │
-    ├──────────────────────┬─────────────────────────┐
-    │                      │                         │
-    ▼                      ▼                         ▼
-Threshold-independent   Threshold-dependent      Training-dynamics
-test evaluation         evaluation               analysis
-    │                      │                         │
-    ▼                      ▼                         ▼
-Performance plots       Operating-point plots    Convergence plots
-and dispersion tables
+client_app.py + server_app.py + task.py
+        │
+        ▼
+Saved model checkpoints
+        │
+        ▼
+scaling_evaluation_fedavg.py
+        │
+        ▼
+Validation-based checkpoint selection
+   ├── bestROC
+   ├── bestPRROC
+   └── bestLoss
+        │
+        ▼
+final_test_set_eval_fedavg.py
+        │
+        ▼
+Final threshold-independent test results
+        │
+        ├── plot-thr-indep-fedavg.py
+        └── table_plot_fedavg.py
 ```
 
-The **validation set** is used for:
+Two additional analyses branch from the saved results.
 
-* configuration selection,
-* communication-round model checkpoint selection,
-* decision-threshold selection.
+Threshold-dependent evaluation:
 
-The **test set is not used to select models, rounds, thresholds, or hyperparameters**. It is used only for the final performance evaluation and the retrospective descriptive training-dynamics analysis.
+```text
+bestPRROC checkpoint
+        │
+        ▼
+evaluate-thr-dependent-fedavg.py
+        │
+        ▼
+Threshold selection on validation
+   ├── MCC-optimal threshold
+   └── Recall ≥ 0.80, then maximum specificity
+        │
+        ▼
+Apply selected threshold unchanged to test
+        │
+        ▼
+plot-thr-dependent-fedavg.py
+```
+
+Training-dynamics analysis:
+
+```text
+Saved checkpoints from evaluated communication rounds
+        │
+        ▼
+evaluate-training-dynamics-fedavg.py
+        │
+        ▼
+Test AP across communication rounds
+   ├── First evaluated round reaching 99% of best test AP
+   └── Late-training test-AP slope
+        │
+        ▼
+plot-training-dynamics-fedavg.py
+```
+
+Additional analysis and comparison scripts include:
+
+```text
+plot_strategy_mcc.py
+    Configuration-selection analysis at 16,384 clients
+
+plot-combined-strategy-comparison.py
+    Cross-strategy comparison of FedAvg, SCAFFOLD, and FedAdam
+```
+
+The validation set is used for checkpoint and threshold selection. The test set is not used to select final checkpoints, decision thresholds, or hyperparameters.
+
+The training-dynamics analysis evaluates intermediate checkpoints retrospectively on the test set for descriptive analysis only and does not affect model or threshold selection.
 
 ---
 
-## Core Federated Learning Components
+# Core Federated Learning Components
 
-The federated training application is organized around three core files: `server_app.py`, `client_app.py`, and `task.py`. Together, they define the server-side aggregation, client-side training, and client-specific data loading used during the Flower simulations.
-
-### `server_app.py`
+## `server_app.py`
 
 ```text
 federated_learning/server_app.py
 ```
 
-Defines the Flower server application and the FedAvg strategy used during training. It coordinates client sampling, distributes the global model, aggregates the returned client updates using sample-size-weighted FedAvg, and handles checkpoint and metric storage during the communication rounds.
+Defines the Flower server application and the FedAvg strategy.
 
-### `client_app.py`
+The server is responsible for:
+
+* coordinating the participating clients,
+* distributing the current global model,
+* aggregating the locally updated client models,
+* maintaining the global model across communication rounds,
+* storing model checkpoints and round information.
+
+FedAvg aggregates the participating client models using the number of local training samples as weights.
+
+The saved communication-round checkpoints are later used for validation-based checkpoint selection and for the retrospective training-dynamics analysis.
+
+---
+
+## `client_app.py`
 
 ```text
 federated_learning/client_app.py
 ```
 
-Defines the Flower client application and the neural network used for local training. Each selected client receives the current global model, trains it on its assigned local dataset using the configured loss, optimizer, learning-rate schedule, and gradient clipping, and returns the updated model parameters to the server.
+Defines the Flower client application, neural network, and local training procedure.
 
-### `task.py`
+The model is a multilayer perceptron with:
+
+```text
+21 input features
+        ↓
+256 hidden units + ReLU
+        ↓
+128 hidden units + ReLU
+        ↓
+2 output logits
+```
+
+For every selected client, the client:
+
+1. receives the current global model,
+2. loads its assigned local training observations,
+3. performs the configured local optimization,
+4. applies gradient clipping,
+5. returns the updated model parameters to the server.
+
+Local training uses class-weighted cross-entropy.
+
+The selected FedAvg configuration uses SGD with momentum together with weight decay and gradient clipping.
+
+---
+
+## `task.py`
 
 ```text
 federated_learning/task.py
 ```
 
-Contains the shared data-loading utilities used by the clients. It loads only the rows assigned to the respective client from the normalized Parquet dataset, retrieves the corresponding training and validation samples, loads the predefined class weights, and creates the PyTorch `DataLoader` objects used during local training and evaluation.
+Contains the data-loading utilities used by the Flower clients and the evaluation scripts.
 
+`load_client_data()` loads only the row IDs assigned to the respective client from:
+
+```text
+data/diabetes_normalized.parquet
+```
+
+The Parquet file is already normalized before training, so no additional feature normalization is performed during local training.
+
+Class weights are loaded from:
+
+```text
+data/norm_stats.json
+```
+
+using the precomputed:
+
+```text
+neg_weight
+pos_weight
+```
 
 ---
 
-# 1. Data Preparation
-
-its already done, no need to repeat this steps.
+# Data Preparation
 
 ## `prepare_data.py`
 
@@ -171,18 +256,50 @@ its already done, no need to repeat this steps.
 federated_learning/tools/prepare_data.py
 ```
 
-Performs the initial dataset preparation and creates the global train, validation, and test assignment together with the metadata required by later processing steps.
+Prepares the BRFSS 2015 diabetes dataset and creates the fixed global train, validation, and test partition.
 
-Example:
+The default proportions are:
+
+```text
+Training:    70%
+Validation:  10%
+Test:        20%
+```
+
+The split is stratified by the binary target variable.
+
+The script stores stable row IDs so that the same observations remain in the global train, validation, and test sets throughout all scaling experiments.
+
+Run:
 
 ```bash
 python3 federated_learning/tools/prepare_data.py \
-    --csv <input.csv> \
+    --csv data/diabetes.csv \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json
 ```
 
-The resulting metadata file contains the stable row indices used to preserve the same global train, validation, and test sets throughout all experiments.
+The current implementation obtains the BRFSS dataset through `kagglehub`; the `--csv` argument is retained by the command-line interface.
+
+Outputs:
+
+```text
+data/diabetes.parquet
+data/norm_stats.json
+```
+
+`norm_stats.json` contains, among other information:
+
+```text
+train_idx
+val_idx
+test_idx
+mean
+std
+target
+```
+
+The normalization statistics are calculated using only the training subset.
 
 ---
 
@@ -192,9 +309,9 @@ The resulting metadata file contains the stable row indices used to preserve the
 federated_learning/tools/normalize_and_add_weights.py
 ```
 
-Standardizes the input features using statistics calculated from the training subset and computes the global class weights used during model training.
+Normalizes the prepared dataset and calculates the class weights used during training.
 
-Example:
+Run:
 
 ```bash
 python3 federated_learning/tools/normalize_and_add_weights.py \
@@ -206,29 +323,34 @@ python3 federated_learning/tools/normalize_and_add_weights.py \
 
 The script:
 
-1. loads the existing train/validation/test assignment,
-2. standardizes all features using training-set statistics,
-3. writes the normalized dataset to Parquet,
-4. calculates the class weights from the training data,
-5. applies the configured positive-class weight boost,
+1. loads the existing train/validation/test split,
+2. normalizes the features using the training-set mean and standard deviation,
+3. writes the normalized dataset,
+4. calculates class weights from the global training subset,
+5. applies the positive-class boost,
 6. stores the resulting weights in `norm_stats.json`.
 
-This script does **not** create new train, validation, or test splits.
+It does **not** create a new train/validation/test split.
 
-The resulting files are:
+Output:
 
 ```text
-data/
-├── diabetes.parquet
-├── diabetes_normalized.parquet
-└── norm_stats.json
+data/diabetes_normalized.parquet
+```
+
+and additional entries in `norm_stats.json`, including:
+
+```text
+pos_weight
+neg_weight
+train_pos_count
+train_neg_count
+pos_weight_boost
 ```
 
 ---
 
-# 2. Creating IID Scaling Splits
-
-Already created.
+# Creating the IID Scaling Partitions
 
 ## `make_splits.py`
 
@@ -236,11 +358,11 @@ Already created.
 federated_learning/tools/make_splits.py
 ```
 
-Contains general helper functions for partitioning data across federated clients.
+Contains general helper functions for client partitioning.
 
-For the final scalability study, its `iid_partitions()` functionality is used to randomly distribute training observations approximately evenly across the clients.
+The final scalability experiment uses its IID partitioning functionality.
 
-The file also contains functionality for other partitioning schemes, but these are not part of the final FedAvg scalability experiment.
+Other partitioning functionality contained in the file is not required for reproducing the final FedAvg scalability study.
 
 ---
 
@@ -250,9 +372,9 @@ The file also contains functionality for other partitioning schemes, but these a
 federated_learning/tools/create_iid_scaling_splits.py
 ```
 
-Creates the client partitions used for the IID scalability study.
+Creates the client partitions used in the final scalability study.
 
-Example:
+Run:
 
 ```bash
 python3 federated_learning/tools/create_iid_scaling_splits.py \
@@ -262,24 +384,42 @@ python3 federated_learning/tools/create_iid_scaling_splits.py \
     --seed 123
 ```
 
-The global training dataset remains unchanged across scaling points. Only the number of clients across which the samples are distributed changes.
+The fixed global training dataset is randomly and approximately evenly distributed across increasing numbers of clients.
 
-Labels are **not used for assigning observations to clients**. Differences in local class composition therefore arise naturally from IID random sampling.
+Importantly, **labels are not used when assigning training observations to clients**. Label information is inspected only afterwards to describe the resulting local class distributions.
 
-The generated files follow the structure:
+For the final FedAvg study, the relevant scaling points are:
+
+```text
+2
+4
+8
+16
+32
+64
+128
+256
+512
+1,024
+2,048
+4,096
+8,192
+16,384
+```
+
+The generated files follow the naming convention:
 
 ```text
 splits_iid_scaling/
 ├── splits_iid_2_clients.json
 ├── splits_iid_4_clients.json
 ├── splits_iid_8_clients.json
-├── splits_iid_16_clients.json
 ├── ...
 ├── splits_iid_8192_clients.json
 └── splits_iid_16384_clients.json
 ```
 
-Each split contains a mapping between client IDs and the global row IDs assigned to that client.
+The global amount of training data remains constant across these files. Only the number and size of the local client datasets change.
 
 ---
 
@@ -289,74 +429,96 @@ Each split contains a mapping between client IDs and the global row IDs assigned
 analyze_iid_splits_one_row_per_split.py
 ```
 
-Analyzes the generated IID scaling splits and creates one summary row for every client configuration.
+Provides a descriptive analysis of the generated IID scaling partitions.
 
-The script calculates, among other quantities:
+The script creates one summary row per scaling point and reports quantities including:
 
 * number of clients,
 * total number of training samples,
-* mean local dataset size,
-* minimum and maximum local dataset size,
-* mean number of positive samples per client,
-* variation in positive samples across clients,
-* number of clients without positive training samples,
-* percentage of clients without positive training samples,
+* mean, minimum, and maximum local dataset size,
+* mean and variation of positive samples per client,
+* minimum and maximum positive samples per client,
+* number of clients without positive observations,
+* percentage of clients without positive observations,
 * global positive-class rate.
 
-This analysis was used to characterize how local data availability and local class composition change under increasing fragmentation.
+This script is used to characterize how local data availability and class composition change as the fixed training dataset becomes increasingly fragmented.
 
----
+It is an analysis utility and is not required to start federated training.
 
-## `adjust_val_distribution.py`
+Run:
 
-```text
-adjust_val_distribution.py
+```bash
+python3 analyze_iid_splits_one_row_per_split.py
 ```
 
-Modifies the generated split files so that all validation samples are assigned to a single validation client, reducing the overhead of centralized validation during training and making evaluation faster.
-
-
 ---
-# 3. Configuring FedAvg
 
-The main configuration file is:
+# Configuring FedAvg
+
+The main experiment configuration is stored in:
 
 ```text
 pyproject.toml
 ```
 
-It contains the default Flower configuration, model-training parameters, data paths, and Ray simulation settings.
+The Flower application entry points connect the project to:
 
-The main experiment settings are located under:
+```text
+federated_learning.server_app
+federated_learning.client_app
+```
+
+The main experiment parameters can be changed under:
 
 ```toml
 [tool.flwr.app.config]
 ```
 
----
-
-## 3.1 Federation Settings
-
-Important federation parameters include:
-
-```toml
-num-server-rounds = 80
-fraction-fit = 0.8
-local-epochs = 1
-```
-
-The final FedAvg scalability experiment uses:
+Relevant parameters include:
 
 ```text
-Communication rounds:       80
-Target client participation: 80%
-Runs per scaling point:      5
-Scaling range:                2–16,384 clients
+num-server-rounds
+fraction-fit
+min-fit-clients
+min-available-clients
+local-epochs
+
+batch-size
+lr
+lr-after
+lr-after-round
+warmup-rounds
+warmup-lr-start
+warmup-lr-end
+weight-decay
+clip-grad-norm
+pos-weight-boost
+
+prepared-parquet
+norm-stats-json
+split-path
+run-tag
 ```
 
-At the two-client configuration, **both clients participate**.
+The final FedAvg scalability study uses:
 
-For all larger configurations, the target participation fraction is converted to a whole number of clients by rounding down:
+```text
+Communication rounds:         80
+Target client participation:  0.80
+Repeated runs:                5
+Scaling range:                2–16,384 clients
+Local epochs:                 1
+Gradient clipping norm:       4.0
+Weight decay:                 5e-4
+Positive-class boost:         1.5
+```
+
+At the two-client scaling point, both clients participate.
+
+For all larger client configurations, the target participation fraction is converted to a whole number of clients by rounding down.
+
+For example:
 
 ```text
 2 clients       → 2 participating clients
@@ -369,26 +531,9 @@ For all larger configurations, the target participation fraction is converted to
 
 ---
 
-## 3.2 Data Paths
+## Learning-Rate Schedule
 
-Relevant data configuration fields include:
-
-```toml
-dataset-path = "data/diabetes.csv"
-prepared-parquet = "data/diabetes_normalized.parquet"
-norm-stats-json = "data/norm_stats.json"
-split-path = "splits_iid_scaling/splits_iid_16384_clients.json"
-```
-
-The `split-path` entry serves as a default. During the scalability study, `run_iid_scaling.sh` passes the appropriate split path for each client configuration through the Flower run configuration.
-
----
-
-## 3.3 Selected FedAvg Optimization Configuration
-
-The configuration selected at the 16,384-client reference setting is used unchanged throughout the scalability study.
-
-### Learning-rate schedule
+The selected FedAvg configuration uses:
 
 ```text
 Rounds 1–12:
@@ -401,118 +546,97 @@ Rounds 60–80:
 cosine-annealing cool-down from 8e-2 to 3e-2
 ```
 
-Additional selected settings:
+The local optimizer configuration is:
 
 ```text
-Positive-class weight boost: 1.5
-Weight decay:                 5e-4
-Gradient clipping norm:       4.0
-Local epochs:                 1
-Communication rounds:         80
-Client participation:         0.80
+Optimizer:          SGD
+Momentum:           0.9
+Weight decay:       5e-4
+Local epochs:       1
+Gradient clipping:  4.0
 ```
 
-The positive-class weighting addresses the class imbalance of the diabetes dataset, while gradient clipping limits excessively large local gradients.
+The configuration used for an actual scaling run is determined by the values in `pyproject.toml` together with values explicitly overridden through Flower's `--run-config`.
 
 ---
 
-## 3.4 Changing Experiment Parameters
+# Starting FedAvg Training
 
-The launcher and `pyproject.toml` serve different purposes.
+There are two ways to start the training.
 
-### `run_iid_scaling.sh`
+## Single Experiment
 
-Use the launcher to change which experiment is executed, including:
+To run one experiment using the current settings in `pyproject.toml`:
 
-* client counts,
-* number of repeated runs,
-* split file,
-* run identifier,
-* number of communication rounds,
-* number of required participating clients.
+```bash
+flwr run .
+```
 
-### `pyproject.toml`
+This is useful for individual runs, configuration tests, and debugging.
 
-Use `pyproject.toml` to change the actual model and optimization configuration, including:
+Before starting, check at least:
 
-* learning rate,
-* learning-rate schedule,
-* warm-up configuration,
-* weight decay,
-* gradient clipping,
-* positive-class weight boost,
-* number of local epochs,
-* dataset paths,
-* Flower settings,
-* Ray CPU and memory resources.
+```text
+split-path
+options.num-supernodes
+num-server-rounds
+fraction-fit
+min-fit-clients
+local-epochs
+learning-rate schedule
+weight-decay
+clip-grad-norm
+run-tag
+```
 
 ---
 
-# 4. Running the FedAvg Scaling Study
+## Scaling Study
 
-## `run_iid_scaling.sh`
+The automated scaling launcher is:
 
 ```text
 federated_learning/tools/run_iid_scaling.sh
 ```
 
-This is the main launcher for the IID FedAvg scalability experiments.
-
-Run it from the project root:
+Run:
 
 ```bash
 ./federated_learning/tools/run_iid_scaling.sh
 ```
 
-If necessary, first make it executable:
+If the script is not executable:
 
 ```bash
 chmod +x federated_learning/tools/run_iid_scaling.sh
 ```
 
----
+The launcher is used to run several client configurations and repeated runs automatically.
 
-## 4.1 Selecting the Scaling Points
+Its main responsibilities are:
 
-The client counts are specified near the beginning of the script:
+1. iterate over the requested client counts,
+2. select the corresponding IID split file,
+3. set the simulated number of clients,
+4. determine the required number of participating clients,
+5. assign a run identifier,
+6. start Flower with the corresponding `--run-config`,
+7. store run-specific logs,
+8. stop remaining Ray processes between experiments.
+
+For the complete final FedAvg study, the client-count list should contain:
 
 ```bash
 CLIENT_COUNTS=(2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384)
 ```
 
-To run only selected scaling points:
-
-```bash
-CLIENT_COUNTS=(1024 2048 4096)
-```
-
-To run only one configuration:
-
-```bash
-CLIENT_COUNTS=(4096)
-```
-
----
-
-## 4.2 Selecting the Number of Repetitions
-
-The final study uses:
+and:
 
 ```bash
 RUNS_PER_SPLIT=5
 ```
 
-For a short test run:
-
-```bash
-RUNS_PER_SPLIT=1
-```
-
----
-
-## 4.3 Split Selection
-
-For every client count `N`, the launcher uses:
+The selected split for `N` clients follows:
 
 ```text
 splits_iid_scaling/splits_iid_<N>_clients.json
@@ -524,17 +648,7 @@ For example:
 splits_iid_scaling/splits_iid_4096_clients.json
 ```
 
-for the 4,096-client configuration.
-
-The number of simulated Flower SuperNodes is adjusted to match the corresponding split.
-
----
-
-## 4.4 Parameters Passed by the Launcher
-
-The launcher passes run-specific values to Flower using `--run-config`.
-
-These include:
+The launcher can pass values such as:
 
 ```text
 split-path
@@ -545,71 +659,35 @@ num-server-rounds
 run-tag
 ```
 
-The values provided through `--run-config` override the corresponding defaults in `pyproject.toml` for the current simulation.
+through Flower's `--run-config`.
+
+These values override the corresponding defaults in `pyproject.toml` for that run.
 
 ---
 
-## 4.5 Logs
+## Running in the Background
 
-Run-specific logs are stored under:
-
-```text
-logs/iid_scaling/
-```
-
-For longer runs on a remote machine, the launcher can be started with:
+For long simulations on a remote machine:
 
 ```bash
 nohup ./federated_learning/tools/run_iid_scaling.sh &
 ```
 
-The launcher cleans up the Ray runtime between experiments and restores temporary changes made to `pyproject.toml`.
+Logs can be inspected with:
 
----
+```bash
+tail -f nohup.out
+```
 
-# 5. Evaluation Workflow
-
-After the training runs are complete, the evaluation follows this order:
+or through the run-specific files under:
 
 ```text
-Training checkpoints
-        │
-        ▼
-scaling_evaluation_fedavg.py
-        │
-        │ Validation-based checkpoint selection
-        │
-        ├── bestROC
-        ├── bestPRROC
-        └── bestLoss
-        │
-        ├───────────────────────────────┐
-        │                               │
-        ▼                               ▼
-final_test_set_eval_fedavg.py   evaluate-thr-dependent-fedavg.py
-        │                               │
-        ▼                               ▼
-Threshold-independent            Threshold-dependent
-test results                     test results
-        │                               │
-        ├───────────────┐               ▼
-        ▼               ▼        plot-thr-dependent-fedavg.py
-plot-thr-indep-    table_plot_
-fedavg.py         fedavg.py
-
-
-All saved round checkpoints
-        │
-        ▼
-evaluate-training-dynamics-fedavg.py
-        │
-        ▼
-plot-training-dynamics-fedavg.py
+logs/iid_scaling/
 ```
 
 ---
 
-# 6. Validation-Based Checkpoint Selection
+# Validation-Based Checkpoint Selection
 
 ## `scaling_evaluation_fedavg.py`
 
@@ -617,28 +695,34 @@ plot-training-dynamics-fedavg.py
 scaling_evaluation_fedavg.py
 ```
 
-This is the **first evaluation step after training**.
+This is the first evaluation step after all required training runs have completed.
 
-For every scaling point and repeated run, the script evaluates the saved communication-round checkpoints on the centralized validation set.
+The script retrospectively evaluates the saved communication-round checkpoints on the validation set.
 
-Three checkpoint-selection criteria are considered independently:
+For the final FedAvg evaluation, the complete validation set is loaded from:
+
+```text
+split_data["val"]["0"]
+```
+
+For every scaling point and repeated run, three checkpoints are selected independently:
 
 ```text
 bestROC
-    highest validation ROC-AUC
+    checkpoint with the highest validation ROC-AUC
 
 bestPRROC
-    highest validation Average Precision (AP)
+    checkpoint with the highest validation Average Precision
 
 bestLoss
-    lowest weighted validation loss
+    checkpoint with the lowest weighted validation loss
 ```
 
-The selected checkpoints are stored under directories such as:
+The selected checkpoints are stored under the legacy strategy directory:
 
 ```text
 result/splits_iid_scaling/
-└── splits_iid_4096_clients.json/
+└── splits_iid_<N>_clients.json/
     └── FedProx/
         ├── bestROC/
         │   ├── run_1/
@@ -656,11 +740,19 @@ result/splits_iid_scaling/
             └── run_5/
 ```
 
-The test set is not used during checkpoint selection.
+Checkpoint selection is based exclusively on validation performance.
+
+The test set is not used during this step.
+
+Run:
+
+```bash
+python3 scaling_evaluation_fedavg.py
+```
 
 ---
 
-# 7. Threshold-Independent Final Test Evaluation
+# Final Threshold-Independent Test Evaluation
 
 ## `final_test_set_eval_fedavg.py`
 
@@ -668,9 +760,9 @@ The test set is not used during checkpoint selection.
 final_test_set_eval_fedavg.py
 ```
 
-Evaluates only the checkpoints that were previously selected using the validation set.
+Evaluates **only the checkpoints that have already been selected using validation data**.
 
-For each client configuration and repeated run, the script evaluates:
+The three selection categories are:
 
 ```text
 bestROC
@@ -678,28 +770,34 @@ bestPRROC
 bestLoss
 ```
 
-on the fixed centralized test set.
+For each selected checkpoint, the script evaluates performance on the fixed centralized test set.
 
-The evaluation calculates:
+It calculates:
 
-* weighted test loss,
+* weighted cross-entropy loss,
 * ROC-AUC,
 * Average Precision,
-* precision-recall curve,
 * ROC curve,
-* class counts,
-* class prevalence,
-* checkpoint provenance information.
+* precision-recall curve,
+* test-set class counts,
+* test-set prevalence,
+* checkpoint and validation-selection provenance.
 
-No model, communication round, threshold, or hyperparameter is selected using the test set.
+No model, communication round, threshold, or hyperparameter is selected on the test set.
 
-The main output directory is:
+Run:
+
+```bash
+python3 final_test_set_eval_fedavg.py
+```
+
+The main output directory retains the legacy strategy identifier:
 
 ```text
 result/splits_iid_scaling/final_test_set_eval/FedProx/
 ```
 
-Important output files include:
+Important combined outputs include:
 
 ```text
 all_test_results.csv
@@ -708,16 +806,16 @@ final_test_summary.json
 test_set_info.json
 ```
 
-and run-specific result files:
+Run-specific outputs include:
 
 ```text
-splits_iid_<N>_clients/
-├── bestROC/
-├── bestPRROC/
-└── bestLoss/
+test_metrics.json
+test_curves.json
 ```
 
 ---
+
+# Threshold-Independent Figures
 
 ## `plot-thr-indep-fedavg.py`
 
@@ -725,9 +823,14 @@ splits_iid_<N>_clients/
 plot-thr-indep-fedavg.py
 ```
 
-Creates the threshold-independent FedAvg scalability figures from the run-level final test results.
+Creates the final threshold-independent FedAvg scalability figures from:
 
-The final main figure contains:
+```text
+result/splits_iid_scaling/final_test_set_eval/FedProx/
+    all_test_results.csv
+```
+
+The main absolute-performance figure contains:
 
 ```text
 Panel A: ROC-AUC
@@ -735,7 +838,7 @@ Panel B: Average Precision
 Panel C: Weighted loss
 ```
 
-Each metric uses the checkpoint selected with its corresponding validation criterion:
+The checkpoint-selection criterion is matched to the reported metric:
 
 ```text
 ROC-AUC       → bestROC
@@ -743,16 +846,7 @@ AP            → bestPRROC
 Weighted loss → bestLoss
 ```
 
-The plot shows both:
-
-* individual repeated runs,
-* mean performance across the five runs.
-
-Default input:
-
-```text
-result/splits_iid_scaling/final_test_set_eval/FedProx/all_test_results.csv
-```
+The plot shows the repeated runs together with the point-specific mean.
 
 Run:
 
@@ -760,11 +854,11 @@ Run:
 python3 plot-thr-indep-fedavg.py
 ```
 
-The script writes high-resolution PNG and vector PDF output.
+The script also supports additional visualizations such as relative change from the two-client baseline and run-to-run stability.
 
 ---
 
-# 8. Run-to-Run Dispersion
+# Run-to-Run Dispersion
 
 ## `table_plot_fedavg.py`
 
@@ -772,24 +866,16 @@ The script writes high-resolution PNG and vector PDF output.
 table_plot_fedavg.py
 ```
 
-Analyzes the variation between the five repeated FedAvg runs at every scaling point.
+Calculates run-to-run dispersion for the threshold-independent FedAvg results.
 
-It reads:
+Input:
 
 ```text
-result/splits_iid_scaling/final_test_set_eval/FedProx/all_test_results.csv
+result/splits_iid_scaling/final_test_set_eval/FedProx/
+    all_test_results.csv
 ```
 
-and computes statistics such as:
-
-* mean,
-* standard deviation,
-* coefficient of variation,
-* minimum,
-* maximum,
-* maximum absolute relative deviation of an individual run from the scaling-point mean.
-
-The analysis is performed separately for:
+For every scaling point, statistics are calculated across the five repeated runs for:
 
 ```text
 ROC-AUC
@@ -797,13 +883,15 @@ Average Precision
 Weighted loss
 ```
 
-using the corresponding validation-selected checkpoints.
+using the corresponding validation-selected checkpoint category.
 
-Run:
+Calculated quantities include:
 
-```bash
-python3 table_plot_fedavg.py
-```
+* mean,
+* standard deviation,
+* coefficient of variation,
+* minimum and maximum,
+* maximum relative deviation of an individual run from the scaling-point mean.
 
 Important outputs include:
 
@@ -811,16 +899,25 @@ Important outputs include:
 run_dispersion_table.csv
 run_dispersion_summary_full.csv
 run_dispersion_table.md
+run_dispersion_text_summary.txt
 run_dispersion_by_scaling.csv
 
+table_run_to_run_dispersion.pdf
+table_run_to_run_dispersion.png
+
+figure_run_to_run_dispersion_by_scaling.pdf
 figure_run_to_run_dispersion_by_scaling.png
 ```
 
-The resulting dispersion figure is used to describe how strongly repeated runs vary at different client counts.
+Run:
+
+```bash
+python3 table_plot_fedavg.py
+```
 
 ---
 
-# 9. Threshold-Dependent Evaluation
+# Threshold-Dependent Evaluation
 
 ## `evaluate-thr-dependent-fedavg.py`
 
@@ -828,43 +925,35 @@ The resulting dispersion figure is used to describe how strongly repeated runs v
 evaluate-thr-dependent-fedavg.py
 ```
 
-Evaluates the final models at two validation-selected operating points.
-
-The analysis uses the model checkpoint selected by **validation AP** (`bestPRROC`).
-
-For each scaling point and run:
-
-1. the trained checkpoint is loaded,
-2. predictions are generated on the centralized validation set,
-3. the decision threshold is selected using validation data,
-4. the selected threshold is transferred unchanged to the test set,
-5. the final threshold-dependent test metrics are calculated.
-
-Two threshold-selection regimes are used.
-
----
-
-## 9.1 MCC-Optimal Operating Point
-
-The first regime selects the threshold that maximizes the Matthews correlation coefficient on the validation set:
+The threshold-dependent analysis uses the checkpoint selected according to the highest validation Average Precision:
 
 ```text
-selected threshold = argmax validation MCC
+bestPRROC
 ```
 
-The selected threshold is then applied unchanged to the test predictions.
+For each scaling point and repeated run, predictions are first generated on the validation set.
 
----
+Two decision-threshold regimes are then evaluated.
 
-## 9.2 Fixed Minimum-Recall Operating Point
+### MCC-Optimal Operating Point
 
-The second regime imposes a validation recall requirement of:
+The decision threshold maximizing **validation MCC** is selected.
+
+### Fixed Minimum-Recall Operating Point
+
+A minimum validation recall requirement is specified before the evaluation.
+
+The final study uses:
 
 ```text
-Recall >= 0.80
+validation recall ≥ 0.80
 ```
 
-Among the thresholds satisfying this constraint, the threshold with the highest validation specificity is selected.
+Among all thresholds satisfying this requirement, the threshold with the highest validation specificity is selected.
+
+Both selected thresholds are subsequently applied **unchanged** to the test set.
+
+No threshold is optimized on test data.
 
 Run:
 
@@ -872,19 +961,12 @@ Run:
 python3 evaluate-thr-dependent-fedavg.py --min-recall 0.80
 ```
 
-The combined results are stored under:
+The combined output is stored under:
 
 ```text
 result/splits_iid_scaling/final_threshold_analysis/FedProx/
+└── all_threshold_results.csv
 ```
-
-including:
-
-```text
-all_threshold_results.csv
-```
-
-and run-specific JSON result files.
 
 ---
 
@@ -894,32 +976,26 @@ and run-specific JSON result files.
 plot-thr-dependent-fedavg.py
 ```
 
-Creates the threshold-dependent FedAvg figures from the results generated by `evaluate-thr-dependent-fedavg.py`.
+Visualizes the results produced by `evaluate-thr-dependent-fedavg.py`.
 
-The plotting script performs **no additional checkpoint or threshold selection**.
+The script performs **no checkpoint, communication-round, or threshold selection**.
 
-### MCC-optimal figure
-
-```text
-Panel A:
-Validation-selected decision threshold
-
-Panel B:
-Test MCC
-
-Panel C:
-Test recall and specificity
-```
-
-### Fixed validation-recall figure
+The MCC-optimal figure contains:
 
 ```text
-Panel A:
-Validation-selected decision threshold
-
-Panel B:
-Test recall and specificity
+Panel A: validation-selected decision threshold
+Panel B: test MCC
+Panel C: test recall and specificity
 ```
+
+The fixed-recall figure contains:
+
+```text
+Panel A: validation-selected decision threshold
+Panel B: test recall and specificity
+```
+
+The recall requirement is imposed on validation data; the corresponding test recall is reported after transferring the selected threshold unchanged.
 
 Run:
 
@@ -927,30 +1003,9 @@ Run:
 python3 plot-thr-dependent-fedavg.py
 ```
 
-Default input:
-
-```text
-result/splits_iid_scaling/final_threshold_analysis/FedProx/
-    all_threshold_results.csv
-```
-
 ---
 
-# 10. Training-Dynamics Analysis
-
-The training-dynamics analysis examines how many communication rounds are required to approach the best observed predictive performance and whether training is still systematically changing near the end of the 80-round horizon.
-
-Unlike the primary final test evaluation, this is a **retrospective descriptive analysis of the saved training trajectory**.
-
-It does not affect:
-
-* training,
-* configuration selection,
-* checkpoint selection,
-* threshold selection,
-* final reported model selection.
-
----
+# Training-Dynamics Analysis
 
 ## `evaluate-training-dynamics-fedavg.py`
 
@@ -958,38 +1013,54 @@ It does not affect:
 evaluate-training-dynamics-fedavg.py
 ```
 
-Evaluates the saved communication-round checkpoints retrospectively on the test set using Average Precision.
+This is a retrospective **centralized-test-set** analysis of the FedAvg training trajectories.
 
-Two quantities are calculated for every run.
+For every scaling point, run, and saved communication-round checkpoint, the script calculates test Average Precision.
 
-### First round reaching 99% of best AP
+The analysis is descriptive only and does not modify:
 
-The script determines:
+* training,
+* hyperparameters,
+* validation-based checkpoint selection,
+* threshold selection,
+* final model selection.
+
+Two quantities are derived.
+
+### First Round Reaching 99% of Best Test AP
+
+For every run, the script identifies the first evaluated communication round satisfying:
 
 ```text
-first evaluated round for which
-
-test AP >= 0.99 × best observed test AP within the same run
+test AP ≥ 0.99 × highest test AP observed within the run
 ```
 
-This provides a descriptive measure of how quickly the run approaches its best observed performance.
+This provides a descriptive measure of how quickly the run approached its best observed test performance.
 
----
+### Late-Training Trend
 
-### Late-training AP trend
-
-An ordinary least-squares linear regression is fitted to test AP over:
+The script fits an ordinary least-squares linear trend to test AP over:
 
 ```text
-rounds 70–80 inclusive
+Rounds 70–80 inclusive
 ```
 
-The resulting slope describes the late-training trend:
+This window contains 11 AP observations spanning ten round-to-round intervals.
+
+The outputs are stored under:
 
 ```text
-positive slope    → AP still increasing
-slope near zero   → little systematic change
-negative slope    → AP decreasing
+result/splits_iid_scaling/training_dynamics/FedProx/
+```
+
+including:
+
+```text
+test_set_info.json
+all_round_test_ap.csv
+training_dynamics_by_run.csv
+training_dynamics_aggregate.csv
+training_dynamics_summary.json
 ```
 
 Run:
@@ -1006,9 +1077,9 @@ python3 evaluate-training-dynamics-fedavg.py
 plot-training-dynamics-fedavg.py
 ```
 
-Plots the results from the training-dynamics evaluation.
+Visualizes the results produced by the training-dynamics evaluation.
 
-The figure contains:
+The figure summarizes:
 
 ```text
 Panel A:
@@ -1016,10 +1087,10 @@ First evaluated communication round reaching
 99% of the best observed test AP
 
 Panel B:
-OLS test-AP slope over communication rounds 70–80
+Late-training test-AP slope over rounds 70–80
 ```
 
-Small points represent individual runs and the connected markers represent the mean across the five repeated runs.
+Small points represent individual runs and connected markers represent the mean across repeated runs.
 
 Run:
 
@@ -1029,7 +1100,7 @@ python3 plot-training-dynamics-fedavg.py
 
 ---
 
-# 11. Configuration-Selection Plot
+# Configuration-Selection Plot
 
 ## `plot_strategy_mcc.py`
 
@@ -1037,173 +1108,200 @@ python3 plot-training-dynamics-fedavg.py
 plot_strategy_mcc.py
 ```
 
-Visualizes the preliminary optimization-configuration experiments conducted at the fixed **16,384-client reference configuration**.
+Visualizes the optimization-configuration experiments conducted at the fixed **16,384-client reference setting** before the final scalability study.
 
-For FedAvg, five candidate configurations were evaluated before the final scalability study.
+For FedAvg, five candidate configurations were evaluated.
 
-The plot is based on validation MCC over the communication rounds and summarizes properties including:
+The analysis is based on validation MCC over communication rounds and summarizes properties such as:
 
-* maximum validation MCC,
+* validation MCC,
 * late-training plateau performance,
 * late-training variation,
-* time required to approach the plateau.
+* convergence speed.
 
-The final FedAvg configuration selected from this experiment was subsequently used unchanged across all scaling points.
+The selected FedAvg configuration was subsequently held fixed across the scalability study.
 
 This script belongs to the **configuration-selection stage** and is not part of the final scaling evaluation pipeline itself.
 
----
-
-# 12. Complete Execution Order
-
-A full reproduction of the FedAvg study follows the sequence below.
-
-## Step 1 — Prepare the raw dataset
+Run:
 
 ```bash
-python3 federated_learning/tools/prepare_data.py \
-    --csv <input.csv> \
-    --parquet data/diabetes.parquet \
-    --stats data/norm_stats.json
+python3 plot_strategy_mcc.py
 ```
 
-## Step 2 — Normalize features and calculate class weights
+---
+
+# Cross-Strategy Comparison
+
+## `plot-combined-strategy-comparison.py`
+
+```text
+plot-combined-strategy-comparison.py
+```
+
+Creates the final overview figures comparing **FedAvg, SCAFFOLD, and FedAdam**.
+
+The script combines the aggregated threshold-independent and threshold-dependent results of all three strategies.
+
+By default, only client scaling points available for all strategies are included. The common comparison range is therefore:
+
+```text
+2–16,384 clients
+```
+
+The script creates three comparison figures.
+
+### MCC-Optimal Operating Point
+
+```text
+Panel A: mean validation-selected decision threshold
+Panel B: mean test MCC
+Panel C: mean test recall and specificity
+```
+
+### Fixed Validation-Recall Operating Point
+
+```text
+Panel A: mean validation-selected decision threshold
+Panel B: mean test recall and specificity
+```
+
+### Threshold-Independent Performance
+
+```text
+Panel A: mean test ROC-AUC
+Panel B: mean test Average Precision
+Panel C: mean weighted test loss
+```
+
+Only the strategy-level mean curves are shown; individual repeated-run points are omitted from these overview figures.
+
+The script internally retains the legacy identifier `FedProx` for the FedAvg result files.
+
+Run:
 
 ```bash
+python3 plot-combined-strategy-comparison.py
+```
+
+The default input and output directories are:
+
+```text
+comparison_input/
+comparison_output/
+```
+
+The expected aggregated inputs include:
+
+```text
+FedProx_threshold_dependent_aggregate.csv
+SCAFFOLD_threshold_dependent_aggregate.csv
+FedAdam_threshold_dependent_aggregate.csv
+
+FedProx_all_test_aggregate.csv
+SCAFFOLD_all_test_aggregate.csv
+FedAdam_all_test_aggregate.csv
+```
+
+---
+
+# Complete Execution Order
+
+For a complete reproduction of the final FedAvg pipeline:
+
+```bash
+# 1. Prepare the fixed train / validation / test split
+python3 federated_learning/tools/prepare_data.py \
+    --csv data/diabetes.csv \
+    --parquet data/diabetes.parquet \
+    --stats data/norm_stats.json
+
+# 2. Normalize the features and calculate class weights
 python3 federated_learning/tools/normalize_and_add_weights.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
     --output data/diabetes_normalized.parquet \
     --pos-weight-boost 1.5
-```
 
-## Step 3 — Create the IID client partitions
-
-```bash
+# 3. Generate the IID scaling partitions
 python3 federated_learning/tools/create_iid_scaling_splits.py \
     --parquet data/diabetes.parquet \
     --stats data/norm_stats.json \
     --output-dir splits_iid_scaling \
     --seed 123
-```
 
-## Step 4 — Analyze the generated partitions
-
-```bash
+# 4. Analyze local data availability and class composition
 python3 analyze_iid_splits_one_row_per_split.py
-```
 
-## Step 5 — Run the FedAvg scaling study
-
-```bash
+# 5. Run the FedAvg scaling experiments
 ./federated_learning/tools/run_iid_scaling.sh
-```
 
-## Step 6 — Select communication-round checkpoints using validation data
+# Alternative: run one experiment using pyproject.toml
+flwr run .
 
-```bash
+# 6. Select communication-round checkpoints using validation
 python3 scaling_evaluation_fedavg.py
-```
 
-## Step 7 — Perform the final threshold-independent test evaluation
-
-```bash
+# 7. Perform final threshold-independent test evaluation
 python3 final_test_set_eval_fedavg.py
-```
 
-## Step 8 — Generate threshold-independent plots
-
-```bash
+# 8. Create threshold-independent figures
 python3 plot-thr-indep-fedavg.py
-```
 
-## Step 9 — Calculate run-to-run dispersion
-
-```bash
+# 9. Calculate run-to-run dispersion
 python3 table_plot_fedavg.py
-```
 
-## Step 10 — Select operating points on validation and evaluate on test
-
-```bash
+# 10. Select validation operating points and evaluate them on test
 python3 evaluate-thr-dependent-fedavg.py --min-recall 0.80
-```
 
-## Step 11 — Generate threshold-dependent plots
-
-```bash
+# 11. Create threshold-dependent figures
 python3 plot-thr-dependent-fedavg.py
-```
 
-## Step 12 — Evaluate training dynamics
-
-```bash
+# 12. Evaluate training dynamics on the centralized test set
 python3 evaluate-training-dynamics-fedavg.py
-```
 
-## Step 13 — Generate the training-dynamics figure
-
-```bash
+# 13. Create the training-dynamics figure
 python3 plot-training-dynamics-fedavg.py
+
+# Optional: configuration-selection visualization
+python3 plot_strategy_mcc.py
+
+# Optional: cross-strategy overview figures
+python3 plot-combined-strategy-comparison.py
 ```
 
 ---
 
-# 13. Project File Overview
-
-## Core Training Files
-
-| File                               | Purpose                                                                           |
-| ---------------------------------- | --------------------------------------------------------------------------------- |
-| `pyproject.toml`                   | Main Flower, optimization, data-path and Ray simulation configuration             |
-| `federated_learning/client_app.py` | Neural-network model and client-side training/evaluation logic                    |
-| `federated_learning/server_app.py` | Server-side FedAvg aggregation, client coordination and checkpoint handling       |
-| `federated_learning/task.py`       | Loads client-specific normalized observations and constructs PyTorch data loaders |
-
-## Data and Partitioning
+# Project File Overview
 
 | File                                                    | Purpose                                                                          |
 | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `federated_learning/tools/prepare_data.py`              | Initial dataset preparation and global train/validation/test metadata            |
-| `federated_learning/tools/normalize_and_add_weights.py` | Standardizes features and calculates class weights                               |
-| `federated_learning/tools/make_splits.py`               | General client-partitioning helper functions                                     |
-| `federated_learning/tools/create_iid_scaling_splits.py` | Generates the IID client partitions used for the scalability study               |
+| `pyproject.toml`                                        | Main Flower, FedAvg, client-training, data-path, and simulation configuration    |
+| `federated_learning/server_app.py`                      | FedAvg aggregation, client coordination, and checkpoint storage                  |
+| `federated_learning/client_app.py`                      | Neural network and local client training                                         |
+| `federated_learning/task.py`                            | Loads client-specific normalized data and class weights                          |
+| `federated_learning/tools/prepare_data.py`              | Creates the fixed global train/validation/test partition                         |
+| `federated_learning/tools/normalize_and_add_weights.py` | Normalizes features and computes class weights                                   |
+| `federated_learning/tools/make_splits.py`               | Helper functions used for client partitioning                                    |
+| `federated_learning/tools/create_iid_scaling_splits.py` | Generates the IID client partitions for the scaling study                        |
 | `analyze_iid_splits_one_row_per_split.py`               | Summarizes local sample availability and class composition across scaling points |
-
-## Training
-
-| File                                          | Purpose                                                            |
-| --------------------------------------------- | ------------------------------------------------------------------ |
-| `federated_learning/tools/run_iid_scaling.sh` | Executes repeated FedAvg experiments across selected client counts |
-
-## Validation and Test Evaluation
-
-| File                                                 | Purpose                                                                                              |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `scaling_evaluation_fedavg.py`                      | Evaluates saved checkpoints on validation and selects the best ROC-AUC, AP and loss checkpoint       |
-| `final_test_set_eval_fedavg.py`                     | Evaluates the validation-selected checkpoints on the fixed final test set                            |
-| `evaluate-thr-dependent-fedavg.py`                  | Selects MCC-optimal and recall-constrained operating points on validation and evaluates them on test |
-| `evaluate-training-dynamics-fedavg.py` | Retrospectively evaluates saved checkpoints to characterize convergence behavior                     |
-
-## Figures and Tables
-
-| File                                             | Purpose                                                     |
-| ------------------------------------------------ | ----------------------------------------------------------- |
-| `plot_strategy_mcc.py`               | Configuration-selection visualization at 16,384 clients for all strategies   |
-| `plot-thr-indep-fedavg.py`                      | Threshold-independent FedAvg scalability figure             |
-| `table_plot_fedavg.py`                          | Run-to-run dispersion statistics, table and appendix figure |
-| `plot-thr-dependent-fedavg.py`                  | Threshold-dependent FedAvg figures                          |
-| `plot-training-dynamics-fedavg.py` | FedAvg training-dynamics appendix figure                 
-| `plot-combined-strategy-comparison.py` | Creates the cross-strategy overview figures comparing FedAvg, SCAFFOLD, and FedAdam for threshold-independent performance and both validation-selected operating points |
-
+| `federated_learning/tools/run_iid_scaling.sh`           | Runs repeated FedAvg experiments across selected client counts                   |
+| `scaling_evaluation_fedavg.py`                          | Selects best ROC-AUC, AP, and loss checkpoints using validation                  |
+| `final_test_set_eval_fedavg.py`                         | Evaluates validation-selected checkpoints on the fixed final test set            |
+| `plot-thr-indep-fedavg.py`                              | Creates threshold-independent FedAvg scalability figures                         |
+| `table_plot_fedavg.py`                                  | Calculates and visualizes run-to-run dispersion                                  |
+| `evaluate-thr-dependent-fedavg.py`                      | Selects operating-point thresholds on validation and evaluates them on test      |
+| `plot-thr-dependent-fedavg.py`                          | Creates threshold-dependent FedAvg figures                                       |
+| `evaluate-training-dynamics-fedavg.py`                  | Retrospective test-AP training-dynamics analysis                                 |
+| `plot-training-dynamics-fedavg.py`                      | Creates the FedAvg training-dynamics figure                                      |
+| `plot_strategy_mcc.py`                                  | Visualizes optimization-configuration selection at 16,384 clients                |
+| `plot-combined-strategy-comparison.py`                  | Creates the final cross-strategy overview figures                                |
 
 ---
 
-# 14. Result Directory Structure
+# Result Directory Structure
 
-Training results are organized by scaling point.
-
-A simplified structure is:
+A simplified result structure is:
 
 ```text
 result/
@@ -1211,13 +1309,13 @@ result/
     │
     ├── splits_iid_2_clients.json/
     │   └── FedProx/
-    │       ├── all_rounds/
+    │       ├── all_rounds_FedProx_1/
+    │       ├── all_rounds_FedProx_2/
+    │       ├── ...
+    │       ├── all_rounds_FedProx_5/
     │       ├── bestROC/
     │       ├── bestPRROC/
     │       └── bestLoss/
-    │
-    ├── splits_iid_4_clients.json/
-    │   └── FedProx/
     │
     ├── ...
     │
@@ -1229,139 +1327,184 @@ result/
     │       ├── all_test_results.csv
     │       ├── all_test_aggregate.csv
     │       ├── final_test_summary.json
-    │       └── ...
+    │       └── test_set_info.json
     │
-    └── final_threshold_analysis/
+    ├── final_threshold_analysis/
+    │   └── FedProx/
+    │       └── all_threshold_results.csv
+    │
+    └── training_dynamics/
         └── FedProx/
-            ├── all_threshold_results.csv
-            └── ...
+            ├── test_set_info.json
+            ├── all_round_test_ap.csv
+            ├── training_dynamics_by_run.csv
+            ├── training_dynamics_aggregate.csv
+            └── training_dynamics_summary.json
 ```
 
-Again, `FedProx` is a legacy directory identifier for the experiments reported as **FedAvg** in the final thesis.
+The `FedProx` identifier is retained in these result paths for compatibility with the experiments that are reported as **FedAvg** in the final thesis.
+
+Some older runs may use alternative round-directory names. The final evaluation scripts support the retained legacy layouts where required.
 
 ---
 
-# 15. Output Formats
+# Useful Commands
 
-The main output formats are:
-
-```text
-.pt
-    PyTorch model checkpoints
-
-.json
-    run-specific metrics, selected-checkpoint metadata
-    and detailed evaluation results
-
-.csv
-    combined run-level and aggregated analysis results
-
-.pdf
-    vector figures
-
-.png
-    high-resolution raster figures
-
-.log
-    Flower simulation logs
-```
-
----
-
-# 16. Useful Commands
-
-## Display command-line options
-
-Most evaluation and utility scripts provide command-line help:
+Start one Flower run:
 
 ```bash
-python3 <script>.py --help
+flwr run .
 ```
 
-For example:
+Start the scaling launcher:
 
 ```bash
-python3 federated_learning/tools/create_iid_scaling_splits.py --help
-python3 evaluate-thr-dependent-fedavg.py --help
-python3 plot-thr-dependent-fedavg.py --help
+./federated_learning/tools/run_iid_scaling.sh
 ```
 
----
-
-## Stop Ray
-
-If a previous simulation left Ray processes running:
-
-```bash
-ray stop --force
-```
-
----
-
-## Start training in the background
+Start the scaling launcher in the background:
 
 ```bash
 nohup ./federated_learning/tools/run_iid_scaling.sh &
 ```
 
----
-
-## Check background output
+Inspect background output:
 
 ```bash
 tail -f nohup.out
 ```
 
-or inspect the run-specific files under:
+Stop remaining Ray processes:
 
-```text
-logs/iid_scaling/
+```bash
+ray stop --force
+```
+
+Display the available command-line options of a script:
+
+```bash
+python3 <script>.py --help
+```
+
+Examples:
+
+```bash
+python3 federated_learning/tools/create_iid_scaling_splits.py --help
+python3 evaluate-thr-dependent-fedavg.py --help
+python3 evaluate-training-dynamics-fedavg.py --help
 ```
 
 ---
 
-# 17. Methodological Notes
+# Methodological Notes
 
-The final FedAvg scalability study follows several important conventions.
+## Fixed Global Training Dataset
 
-### Fixed global dataset
+The amount of global training data remains constant throughout the scaling experiment.
 
-The total training dataset remains constant across all client configurations. Increasing the client count therefore represents increasing **client-level data fragmentation**, not an increase in training data.
-
-### IID client partitioning
-
-Training observations are randomly and approximately evenly distributed across clients without using the labels during partitioning.
-
-### Fixed configuration across scaling points
-
-The FedAvg optimization configuration is selected at 16,384 clients and subsequently held constant across the complete scaling range.
-
-This allows the experiment to examine how one fixed configuration responds to increasing fragmentation rather than retuning the model independently at every client count.
-
-### Repeated experiments
-
-Each scaling point is repeated five times to characterize run-to-run variation.
-
-### Validation-based model selection
-
-Communication-round checkpoints are selected using the centralized validation set only.
-
-### Validation-based threshold selection
-
-Both the MCC-optimal decision threshold and the fixed minimum-recall operating point are selected using validation predictions.
-
-### Final test evaluation
-
-The test set is only evaluated after the relevant checkpoint and, where applicable, decision threshold have already been selected.
-
-### Training-dynamics analysis
-
-The retrospective evaluation of all saved test-set checkpoints is used only to characterize training behavior and does not alter any training or model-selection decision.
+Increasing the number of clients therefore represents increasing **client-level data fragmentation**, not an increase in available training data.
 
 ---
 
-# 18. Scope
+## IID Client Partitioning
 
-This README documents the **FedAvg branch of the bachelor-thesis experiments**.
+Training observations are randomly and approximately evenly distributed across clients.
 
-The repository may contain additional scripts from earlier experiments or implementations of other federated optimization strategies. These are not required for reproducing the FedAvg scalability results described above.
+Labels are not used when assigning training observations to clients.
+
+Local differences in class composition therefore arise naturally from random fragmentation.
+
+---
+
+## Fixed FedAvg Configuration
+
+One FedAvg configuration was selected in the 16,384-client reference setting and subsequently applied unchanged across the scalability study.
+
+The final scaling range extends from 2 to 16,384 clients.
+
+---
+
+## Client Participation
+
+FedAvg uses a target client participation fraction of:
+
+```text
+0.80
+```
+
+At the two-client configuration, both clients participate.
+
+For larger client configurations, the requested participation fraction is converted to a whole number of participating clients by rounding down.
+
+---
+
+## Validation-Based Checkpoint Selection
+
+The final reported threshold-independent metrics use different validation-based checkpoint-selection criteria:
+
+```text
+ROC-AUC       → checkpoint with highest validation ROC-AUC
+AP            → checkpoint with highest validation AP
+Weighted loss → checkpoint with lowest validation loss
+```
+
+No checkpoint is selected using test performance.
+
+---
+
+## Threshold Selection
+
+Threshold-dependent analyses use the `bestPRROC` checkpoint.
+
+The decision threshold is determined on validation data according to either:
+
+```text
+maximum validation MCC
+```
+
+or:
+
+```text
+validation recall ≥ 0.80
+followed by maximum validation specificity
+```
+
+The selected threshold is then applied unchanged to the test set.
+
+---
+
+## Final Test Set
+
+The same centralized test set is used for every scaling point and run.
+
+Its membership is defined by:
+
+```text
+norm_stats.json["test_idx"]
+```
+
+The test set does not influence model training, hyperparameter selection, checkpoint selection, or decision-threshold selection.
+
+---
+
+## Training Dynamics
+
+Training dynamics are evaluated retrospectively on the centralized **test set**.
+
+The analysis determines:
+
+```text
+first evaluated round reaching 99% of best test AP
+```
+
+and:
+
+```text
+late-training test-AP slope
+```
+
+For the 80-round FedAvg runs, the late-training interval is rounds 70–80 inclusive.
+
+This analysis is descriptive and does not affect model or threshold selection.
+
+---
